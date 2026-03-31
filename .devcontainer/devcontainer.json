@@ -1,0 +1,17 @@
+{
+  "name": "study-connect-dev",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "api",
+  "workspaceFolder": "/app",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "Prisma.prisma"
+      ]
+    }
+  },
+  "postCreateCommand": "npm install && npx prisma generate",
+  "remoteUser": "root"
+}
