@@ -1,18 +1,16 @@
 /// <reference path="../src/types/express.d.ts" />
 import { ValidationPipe } from '@nestjs/common';
+import { MaterialStatus } from '@prisma/client';
 import { Test } from '@nestjs/testing';
 import { AppModule } from '../src/app.module';
-import { MinioService, PrismaService } from '../src/infra';
-
-type UserRole = 'USER' | 'ADMIN';
-type MaterialStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+import { PrismaService } from '../src/infra';
 
 type DbUser = {
   id: string;
   email: string;
   username: string;
   passwordHash: string;
-  role: UserRole;
+  role: 'USER' | 'ADMIN';
 };
 
 type DbMaterial = {
@@ -44,7 +42,7 @@ class PrismaServiceMock {
       data,
       select,
     }: {
-      data: { email: string; username: string; passwordHash: string; role: UserRole };
+      data: { email: string; username: string; passwordHash: string; role: 'USER' | 'ADMIN' };
       select: { id?: boolean; email?: boolean; username?: boolean; role?: boolean };
     }) => {
       const user: DbUser = {
@@ -55,6 +53,7 @@ class PrismaServiceMock {
         role: data.role,
       };
       this.users.push(user);
+
       return {
         ...(select.id ? { id: user.id } : {}),
         ...(select.email ? { email: user.email } : {}),
@@ -68,115 +67,113 @@ class PrismaServiceMock {
   };
 
   material = {
-    create: async ({
-      data,
-      select,
-    }: {
-      data: {
-        title: string;
-        description?: string;
-        fileKey: string;
-        visibility: 'PUBLIC' | 'PRIVATE';
-        status: MaterialStatus;
-        reviewComment?: string;
-        uploaderId: string;
-      };
-      select: Record<string, boolean>;
-    }) => {
-      const now = new Date();
-      const material: DbMaterial = {
-        id: crypto.randomUUID(),
-        title: data.title,
-        description: data.description ?? null,
-        fileKey: data.fileKey,
-        visibility: data.visibility,
-        status: data.status,
-        reviewComment: data.reviewComment ?? null,
-        uploaderId: data.uploaderId,
-        createdAt: now,
-        updatedAt: now,
-      };
-      this.materials.push(material);
-      return this.pick(material, select);
+    count: async ({ where }: { where: { status: MaterialStatus } }) => {
+      return this.materials.filter((m) => m.status === where.status).length;
     },
-
     findMany: async ({
       where,
-      orderBy,
       skip,
       take,
       select,
     }: {
       where: { status: MaterialStatus };
-      orderBy: { createdAt: 'desc' | 'asc' };
+      orderBy: { createdAt: 'asc' };
       skip: number;
       take: number;
-      select: Record<string, boolean>;
+      select: {
+        id?: boolean;
+        title?: boolean;
+        status?: boolean;
+        uploaderId?: boolean;
+        createdAt?: boolean;
+        updatedAt?: boolean;
+        reviewComment?: boolean;
+      };
     }) => {
-      const filtered = this.materials.filter((m) => m.status === where.status);
-      const ordered = [...filtered].sort((a, b) =>
-        orderBy.createdAt === 'desc'
-          ? b.createdAt.getTime() - a.createdAt.getTime()
-          : a.createdAt.getTime() - b.createdAt.getTime(),
-      );
-      return ordered.slice(skip, skip + take).map((m) => this.pick(m, select));
-    },
+      const filtered = this.materials
+        .filter((m) => m.status === where.status)
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+        .slice(skip, skip + take);
 
-    count: async ({ where }: { where: { status: MaterialStatus } }) => {
-      return this.materials.filter((m) => m.status === where.status).length;
+      return filtered.map((m) => ({
+        ...(select.id ? { id: m.id } : {}),
+        ...(select.title ? { title: m.title } : {}),
+        ...(select.status ? { status: m.status } : {}),
+        ...(select.uploaderId ? { uploaderId: m.uploaderId } : {}),
+        ...(select.createdAt ? { createdAt: m.createdAt } : {}),
+        ...(select.updatedAt ? { updatedAt: m.updatedAt } : {}),
+        ...(select.reviewComment ? { reviewComment: m.reviewComment } : {}),
+      }));
     },
-
     update: async ({
       where,
       data,
       select,
     }: {
       where: { id: string };
-      data: { status: MaterialStatus; reviewComment: string };
-      select: Record<string, boolean>;
+      data: { status?: MaterialStatus; reviewComment?: string };
+      select: { id?: boolean; status?: boolean; reviewComment?: boolean; updatedAt?: boolean };
     }) => {
       const material = this.materials.find((m) => m.id === where.id);
       if (!material) {
-        throw new Error('not found');
+        const err = new Error('not found') as Error & { code?: string };
+        err.code = 'P2025';
+        throw err;
       }
-      material.status = data.status;
-      material.reviewComment = data.reviewComment;
+
+      if (data.status) {
+        material.status = data.status;
+      }
+      if (Object.prototype.hasOwnProperty.call(data, 'reviewComment')) {
+        material.reviewComment = data.reviewComment ?? null;
+      }
       material.updatedAt = new Date();
-      return this.pick(material, select);
+
+      return {
+        ...(select.id ? { id: material.id } : {}),
+        ...(select.status ? { status: material.status } : {}),
+        ...(select.reviewComment ? { reviewComment: material.reviewComment } : {}),
+        ...(select.updatedAt ? { updatedAt: material.updatedAt } : {}),
+      };
     },
   };
 
-  setUserRole(email: string, role: UserRole): void {
+  $transaction = async <T>(operations: Promise<T>[]): Promise<T[]> => Promise.all(operations);
+
+  debugSetRole(email: string, role: 'USER' | 'ADMIN'): void {
     const user = this.users.find((u) => u.email === email);
-    if (user) {
-      user.role = role;
-    }
+    if (user) user.role = role;
   }
 
-  debugMaterialById(id: string): DbMaterial | null {
+  debugGetUserByEmail(email: string): DbUser | null {
+    return this.users.find((u) => u.email === email) ?? null;
+  }
+
+  debugAddPendingMaterial(uploaderId: string, title: string): string {
+    const id = crypto.randomUUID();
+    const now = new Date();
+    this.materials.push({
+      id,
+      title,
+      description: null,
+      fileKey: `demo/${id}.txt`,
+      visibility: 'PUBLIC',
+      status: MaterialStatus.PENDING,
+      reviewComment: null,
+      uploaderId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return id;
+  }
+
+  debugGetMaterial(id: string): DbMaterial | null {
     return this.materials.find((m) => m.id === id) ?? null;
-  }
-
-  private pick(material: DbMaterial, select: Record<string, boolean>) {
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(select)) {
-      if (select[key]) {
-        out[key] = (material as Record<string, unknown>)[key];
-      }
-    }
-    return out;
-  }
-}
-
-class MinioServiceMock {
-  async uploadObject(key: string): Promise<string> {
-    return `study-connect/${key}`;
   }
 }
 
 async function run(): Promise<void> {
-  process.env.JWT_SECRET = 'task4-secret';
-  process.env.MAX_UPLOAD_SIZE_MB = '50';
+  process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'test-secret';
 
   const prismaMock = new PrismaServiceMock();
 
@@ -185,12 +182,17 @@ async function run(): Promise<void> {
   })
     .overrideProvider(PrismaService)
     .useValue(prismaMock)
-    .overrideProvider(MinioService)
-    .useValue(new MinioServiceMock())
     .compile();
 
   const app = moduleRef.createNestApplication();
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }));
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: true,
+    }),
+  );
+
   await app.init();
   await app.listen(0);
 
@@ -198,87 +200,83 @@ async function run(): Promise<void> {
   const port = typeof address === 'string' ? 3000 : address.port;
   const base = `http://127.0.0.1:${port}`;
 
-  // register user + admin
   await fetch(`${base}/auth/register`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: 'user@example.com', username: 'user1', password: 'StrongPass123!' }),
+    body: JSON.stringify({
+      email: 'user@example.com',
+      username: 'normalUser',
+      password: 'StrongPass123!',
+    }),
   });
+
   await fetch(`${base}/auth/register`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: 'admin@example.com', username: 'admin1', password: 'StrongPass123!' }),
+    body: JSON.stringify({
+      email: 'admin@example.com',
+      username: 'adminUser',
+      password: 'StrongPass123!',
+    }),
   });
 
-  prismaMock.setUserRole('admin@example.com', 'ADMIN');
+  prismaMock.debugSetRole('admin@example.com', 'ADMIN');
 
-  const userLogin = await fetch(`${base}/auth/login`, {
+  const userObj = prismaMock.debugGetUserByEmail('user@example.com');
+  if (!userObj) throw new Error('user seed failed');
+
+  const materialA = prismaMock.debugAddPendingMaterial(userObj.id, 'Pending A');
+  const materialB = prismaMock.debugAddPendingMaterial(userObj.id, 'Pending B');
+
+  const userLoginRes = await fetch(`${base}/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: 'user@example.com', password: 'StrongPass123!' }),
+    body: JSON.stringify({
+      email: 'user@example.com',
+      password: 'StrongPass123!',
+    }),
   });
-  const userToken = ((await userLogin.json()) as { accessToken: string }).accessToken;
+  const userLoginJson = (await userLoginRes.json()) as { accessToken: string };
 
-  const adminLogin = await fetch(`${base}/auth/login`, {
+  const adminLoginRes = await fetch(`${base}/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: 'admin@example.com', password: 'StrongPass123!' }),
+    body: JSON.stringify({
+      email: 'admin@example.com',
+      password: 'StrongPass123!',
+    }),
   });
-  const adminToken = ((await adminLogin.json()) as { accessToken: string }).accessToken;
+  const adminLoginJson = (await adminLoginRes.json()) as { accessToken: string };
 
-  const forbiddenRes = await fetch(`${base}/admin/materials/pending?page=1&pageSize=10`, {
-    headers: { authorization: `Bearer ${userToken}` },
+  const userPendingRes = await fetch(`${base}/admin/materials/pending?page=1&limit=1`, {
+    headers: { authorization: `Bearer ${userLoginJson.accessToken}` },
   });
-  console.log('user pending list status:', forbiddenRes.status);
+  const userPendingBody = await userPendingRes.text();
+  console.log('user pending status:', userPendingRes.status, 'body:', userPendingBody);
 
-  async function uploadOne(title: string): Promise<string> {
-    const form = new FormData();
-    form.set('title', title);
-    form.set('description', `${title} description`);
-    form.set('visibility', 'PUBLIC');
-    form.set('file', new Blob(['data'], { type: 'text/plain' }), `${title}.txt`);
-
-    const res = await fetch(`${base}/materials`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${userToken}` },
-      body: form,
-    });
-    const body = (await res.json()) as { id: string };
-    return body.id;
-  }
-
-  const materialApproveId = await uploadOne('to-approve');
-  const materialRejectId = await uploadOne('to-reject');
-
-  const pendingRes = await fetch(`${base}/admin/materials/pending?page=1&pageSize=10`, {
-    headers: { authorization: `Bearer ${adminToken}` },
+  const adminPendingRes = await fetch(`${base}/admin/materials/pending?page=1&limit=1`, {
+    headers: { authorization: `Bearer ${adminLoginJson.accessToken}` },
   });
-  const pendingText = await pendingRes.text();
-  console.log('admin pending list status:', pendingRes.status);
-  console.log('admin pending list body:', pendingText);
+  const adminPendingBody = await adminPendingRes.text();
+  console.log('admin pending status:', adminPendingRes.status, 'body:', adminPendingBody);
 
-  const approveRes = await fetch(`${base}/admin/materials/${materialApproveId}/approve`, {
+  const approveRes = await fetch(`${base}/admin/materials/${materialA}/approve`, {
     method: 'POST',
-    headers: { authorization: `Bearer ${adminToken}` },
+    headers: { authorization: `Bearer ${adminLoginJson.accessToken}` },
   });
-  const approveText = await approveRes.text();
-  console.log('approve status:', approveRes.status);
-  console.log('approve body:', approveText);
+  console.log('approve status:', approveRes.status, 'body:', await approveRes.text());
+  console.log('db materialA:', JSON.stringify(prismaMock.debugGetMaterial(materialA)));
 
-  const rejectRes = await fetch(`${base}/admin/materials/${materialRejectId}/reject`, {
+  const rejectRes = await fetch(`${base}/admin/materials/${materialB}/reject`, {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${adminToken}`,
+      authorization: `Bearer ${adminLoginJson.accessToken}`,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({ reason: 'Spam content' }),
+    body: JSON.stringify({ reason: 'Contains incorrect or harmful content.' }),
   });
-  const rejectText = await rejectRes.text();
-  console.log('reject status:', rejectRes.status);
-  console.log('reject body:', rejectText);
-
-  console.log('db approved material:', JSON.stringify(prismaMock.debugMaterialById(materialApproveId)));
-  console.log('db rejected material:', JSON.stringify(prismaMock.debugMaterialById(materialRejectId)));
+  console.log('reject status:', rejectRes.status, 'body:', await rejectRes.text());
+  console.log('db materialB:', JSON.stringify(prismaMock.debugGetMaterial(materialB)));
 
   await app.close();
 }
