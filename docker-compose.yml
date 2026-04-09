@@ -1,0 +1,30 @@
+services:
+  api:
+    build: .
+    working_dir: /workspace/Study-connect
+    volumes:
+      - ./:/workspace/Study-connect
+      - node_modules:/workspace/Study-connect/node_modules
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+    command: npm run start:dev
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: study_connect
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
+volumes:
+  pg-data:
+  node_modules:
