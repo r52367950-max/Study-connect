@@ -47,6 +47,7 @@ model Material {
   fileKey       String             @map("file_key")
   visibility    MaterialVisibility @default(PUBLIC)
   status        MaterialStatus     @default(PENDING)
+  reviewComment String?            @map("review_comment")
   uploaderId    String             @map("uploader_id") @db.Uuid
   createdAt     DateTime           @default(now()) @map("created_at")
   updatedAt     DateTime           @updatedAt @map("updated_at")
