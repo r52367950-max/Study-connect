@@ -10,7 +10,8 @@
     "lint": "eslint \"{src,prisma}/**/*.ts\"",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "test:min-auth": "ts-node scripts/min-auth-check.ts"
+    "test:min-auth": "ts-node scripts/min-auth-check.ts",
+    "test:min-material-upload": "ts-node scripts/min-material-upload-check.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.0",
