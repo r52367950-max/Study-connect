@@ -184,6 +184,36 @@ export class MaterialsService {
     };
   }
 
+  async downloadApprovedMaterial(materialId: string, userId: string) {
+    const material = await this.prisma.material.findFirst({
+      where: {
+        id: materialId,
+        status: MaterialStatus.APPROVED,
+      },
+      select: {
+        id: true,
+        fileKey: true,
+      },
+    });
+
+    if (!material) {
+      throw new NotFoundException('Material is not available for download');
+    }
+
+    await this.prisma.download.create({
+      data: {
+        userId,
+        materialId: material.id,
+      },
+    });
+
+    return {
+      materialId: material.id,
+      downloadUrl: this.minioService.getObjectUrl(material.fileKey),
+      message: 'Download recorded',
+    };
+  }
+
   private buildApprovedWhere(query: MaterialSearchQueryDto): Prisma.MaterialWhereInput {
     return {
       status: MaterialStatus.APPROVED,

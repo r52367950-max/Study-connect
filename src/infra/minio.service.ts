@@ -42,6 +42,10 @@ export class MinioService {
     return `${this.bucket}/${key}`;
   }
 
+  getObjectUrl(key: string): string {
+    return `${this.baseUrl()}/${this.bucket}/${this.encodePath(key)}`;
+  }
+
   private async ensureBucket(): Promise<void> {
     const headResponse = await this.signedRequest({
       method: 'HEAD',

@@ -63,6 +63,13 @@ export class MaterialsController {
     return this.materialsService.getApprovedDetail(id);
   }
 
+  @Get(':id/download')
+  @ApiOperation({ summary: 'Download approved material (auth required)' })
+  @ApiParam({ name: 'id', type: String })
+  download(@Param('id') id: string, @Req() req: Request) {
+    return this.materialsService.downloadApprovedMaterial(id, req.user.id);
+  }
+
   @Post()
   @ApiOperation({ summary: 'Upload material file to MinIO and create pending material record' })
   @ApiConsumes('multipart/form-data')
