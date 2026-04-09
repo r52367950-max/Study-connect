@@ -1,19 +1,31 @@
 import {
-  HttpStatus,
-  UnprocessableEntityException,
   Body,
   Controller,
+  Get,
+  HttpStatus,
+  Param,
   ParseFilePipeBuilder,
   Post,
+  Query,
   Req,
+  UnprocessableEntityException,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiParam,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Request } from 'express';
+import { Public } from '../auth/decorators/public.decorator';
 import { CreateMaterialDto } from './dto/create-material.dto';
+import { MaterialSearchQueryDto } from './dto/material-search-query.dto';
 import { UploadFileInput } from './file-upload.type';
 import { MaterialsService, UploadedMaterial } from './materials.service';
 
@@ -36,6 +48,21 @@ export class MaterialsController {
     private readonly configService: ConfigService,
   ) {}
 
+  @Get()
+  @Public()
+  @ApiOperation({ summary: 'Public material search (APPROVED only)' })
+  list(@Query() query: MaterialSearchQueryDto) {
+    return this.materialsService.searchApproved(query);
+  }
+
+  @Get(':id')
+  @Public()
+  @ApiOperation({ summary: 'Public material detail (APPROVED only)' })
+  @ApiParam({ name: 'id', type: String })
+  detail(@Param('id') id: string) {
+    return this.materialsService.getApprovedDetail(id);
+  }
+
   @Post()
   @ApiOperation({ summary: 'Upload material file to MinIO and create pending material record' })
   @ApiConsumes('multipart/form-data')
@@ -46,6 +73,11 @@ export class MaterialsController {
       properties: {
         title: { type: 'string' },
         description: { type: 'string' },
+        stage: { type: 'string' },
+        grade: { type: 'string' },
+        subject: { type: 'string' },
+        year: { type: 'number' },
+        region: { type: 'string' },
         visibility: { type: 'string', enum: ['PUBLIC', 'PRIVATE'] },
         file: { type: 'string', format: 'binary' },
       },

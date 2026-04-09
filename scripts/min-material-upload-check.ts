@@ -16,6 +16,11 @@ type DbMaterial = {
   id: string;
   title: string;
   description: string | null;
+  stage: string | null;
+  grade: string | null;
+  subject: string | null;
+  year: number | null;
+  region: string | null;
   fileKey: string;
   visibility: 'PUBLIC' | 'PRIVATE';
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -71,6 +76,11 @@ class PrismaServiceMock {
       data: {
         title: string;
         description?: string;
+        stage?: string;
+        grade?: string;
+        subject?: string;
+        year?: number;
+        region?: string;
         fileKey: string;
         visibility: 'PUBLIC' | 'PRIVATE';
         status: 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -80,6 +90,11 @@ class PrismaServiceMock {
         id?: boolean;
         title?: boolean;
         description?: boolean;
+        stage?: boolean;
+        grade?: boolean;
+        subject?: boolean;
+        year?: boolean;
+        region?: boolean;
         fileKey?: boolean;
         visibility?: boolean;
         status?: boolean;
@@ -91,6 +106,11 @@ class PrismaServiceMock {
         id: crypto.randomUUID(),
         title: data.title,
         description: data.description ?? null,
+        stage: data.stage ?? null,
+        grade: data.grade ?? null,
+        subject: data.subject ?? null,
+        year: data.year ?? null,
+        region: data.region ?? null,
         fileKey: data.fileKey,
         visibility: data.visibility,
         status: data.status,
@@ -104,6 +124,11 @@ class PrismaServiceMock {
         ...(select.id ? { id: material.id } : {}),
         ...(select.title ? { title: material.title } : {}),
         ...(select.description ? { description: material.description } : {}),
+        ...(select.stage ? { stage: material.stage } : {}),
+        ...(select.grade ? { grade: material.grade } : {}),
+        ...(select.subject ? { subject: material.subject } : {}),
+        ...(select.year ? { year: material.year } : {}),
+        ...(select.region ? { region: material.region } : {}),
         ...(select.fileKey ? { fileKey: material.fileKey } : {}),
         ...(select.visibility ? { visibility: material.visibility } : {}),
         ...(select.status ? { status: material.status } : {}),

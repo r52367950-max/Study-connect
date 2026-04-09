@@ -1,75 +1,69 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { MaterialStatus, Prisma } from '@prisma/client';
+import { MaterialStatus } from '@prisma/client';
 import { PrismaService } from '../../infra';
-
-export type PendingMaterialsResult = {
-  page: number;
-  limit: number;
-  total: number;
-  items: Array<{
-    id: string;
-    title: string;
-    status: MaterialStatus;
-    uploaderId: string;
-    createdAt: Date;
-    updatedAt: Date;
-    reviewComment: string | null;
-  }>;
-};
 
 @Injectable()
 export class AdminService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async listPending(page: number, limit: number): Promise<PendingMaterialsResult> {
-    const skip = (page - 1) * limit;
+  async getPendingMaterials(page: number, pageSize: number) {
+    const skip = (page - 1) * pageSize;
 
-    const [total, items] = await this.prisma.$transaction([
-      this.prisma.material.count({ where: { status: MaterialStatus.PENDING } }),
+    const [items, total] = await Promise.all([
       this.prisma.material.findMany({
         where: { status: MaterialStatus.PENDING },
-        orderBy: { createdAt: 'asc' },
+        orderBy: { createdAt: 'desc' },
         skip,
-        take: limit,
+        take: pageSize,
         select: {
           id: true,
           title: true,
+          description: true,
           status: true,
+          reviewComment: true,
           uploaderId: true,
           createdAt: true,
           updatedAt: true,
-          reviewComment: true,
         },
+      }),
+      this.prisma.material.count({
+        where: { status: MaterialStatus.PENDING },
       }),
     ]);
 
     return {
       page,
-      limit,
+      pageSize,
       total,
       items,
     };
   }
 
-  async approveMaterial(id: string) {
-    return this.updateStatusOrThrow(id, {
+  async approveMaterial(materialId: string, adminId: string) {
+    return this.updateMaterialReview(materialId, {
       status: MaterialStatus.APPROVED,
-      reviewComment: 'Approved by admin',
+      reviewComment: `Approved by ${adminId}`,
     });
   }
 
-  async rejectMaterial(id: string, reason: string) {
-    return this.updateStatusOrThrow(id, {
+  async rejectMaterial(materialId: string, reason: string, adminId: string) {
+    return this.updateMaterialReview(materialId, {
       status: MaterialStatus.REJECTED,
-      reviewComment: reason,
+      reviewComment: `[${adminId}] ${reason}`,
     });
   }
 
-  private async updateStatusOrThrow(id: string, data: Prisma.MaterialUpdateInput) {
+  private async updateMaterialReview(
+    materialId: string,
+    data: { status: MaterialStatus; reviewComment: string },
+  ) {
     try {
       return await this.prisma.material.update({
-        where: { id },
-        data,
+        where: { id: materialId },
+        data: {
+          status: data.status,
+          reviewComment: data.reviewComment,
+        },
         select: {
           id: true,
           status: true,
@@ -77,12 +71,8 @@ export class AdminService {
           updatedAt: true,
         },
       });
-    } catch (error: unknown) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-        throw new NotFoundException('Material not found');
-      }
-
-      throw error;
+    } catch {
+      throw new NotFoundException('Material not found');
     }
   }
 }

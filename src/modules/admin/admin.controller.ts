@@ -1,10 +1,16 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
+import { Request } from 'express';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { AdminService, PendingMaterialsResult } from './admin.service';
-import { ListPendingMaterialsDto } from './dto/list-pending-materials.dto';
+import { PendingMaterialsQueryDto } from './dto/pending-materials-query.dto';
 import { RejectMaterialDto } from './dto/reject-material.dto';
+import { AdminService } from './admin.service';
 
 @ApiTags('admin')
 @ApiBearerAuth()
@@ -15,19 +21,28 @@ export class AdminController {
 
   @Get('materials/pending')
   @ApiOperation({ summary: 'List pending materials with pagination' })
-  listPending(@Query() query: ListPendingMaterialsDto): Promise<PendingMaterialsResult> {
-    return this.adminService.listPending(query.page, query.limit);
+  getPending(@Query() query: PendingMaterialsQueryDto) {
+    return this.adminService.getPendingMaterials(query.page ?? 1, query.pageSize ?? 10);
   }
 
   @Post('materials/:id/approve')
-  @ApiOperation({ summary: 'Approve a material' })
-  approve(@Param('id') id: string) {
-    return this.adminService.approveMaterial(id);
+  @ApiOperation({ summary: 'Approve one material' })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        id: 'uuid',
+        status: 'APPROVED',
+        reviewComment: 'Approved by <admin-id>',
+      },
+    },
+  })
+  approve(@Param('id') id: string, @Req() req: Request) {
+    return this.adminService.approveMaterial(id, req.user.id);
   }
 
   @Post('materials/:id/reject')
-  @ApiOperation({ summary: 'Reject a material with reason' })
-  reject(@Param('id') id: string, @Body() dto: RejectMaterialDto) {
-    return this.adminService.rejectMaterial(id, dto.reason);
+  @ApiOperation({ summary: 'Reject one material with reason' })
+  reject(@Param('id') id: string, @Body() dto: RejectMaterialDto, @Req() req: Request) {
+    return this.adminService.rejectMaterial(id, dto.reason, req.user.id);
   }
 }
