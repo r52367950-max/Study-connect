@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MaterialVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum MaterialStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id           String     @id @default(uuid()) @db.Uuid
+  email        String     @unique
+  username     String     @unique
+  passwordHash String     @map("password_hash")
+  role         UserRole   @default(USER)
+  avatarUrl    String?    @map("avatar_url")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  materials    Material[]
+  ratings      Rating[]
+  downloads    Download[]
+
+  @@map("users")
+}
+
+model Material {
+  id            String             @id @default(uuid()) @db.Uuid
+  title         String
+  description   String?
+  fileKey       String             @map("file_key")
+  visibility    MaterialVisibility @default(PUBLIC)
+  status        MaterialStatus     @default(PENDING)
+  uploaderId    String             @map("uploader_id") @db.Uuid
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+
+  uploader      User               @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  ratings       Rating[]
+  downloads     Download[]
+
+  @@index([uploaderId])
+  @@map("materials")
+}
+
+model Rating {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  materialId  String    @map("material_id") @db.Uuid
+  score       Int
+  comment     String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  material    Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, materialId])
+  @@index([materialId])
+  @@map("ratings")
+}
+
+model Download {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  materialId   String    @map("material_id") @db.Uuid
+  downloadedAt DateTime  @default(now()) @map("downloaded_at")
+
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  material     Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([materialId])
+  @@map("downloads")
+}
