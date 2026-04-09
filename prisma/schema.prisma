@@ -90,7 +90,7 @@ model Download {
   id           String    @id @default(uuid()) @db.Uuid
   userId       String    @map("user_id") @db.Uuid
   materialId   String    @map("material_id") @db.Uuid
-  downloadedAt DateTime  @default(now()) @map("downloaded_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
 
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   material     Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)

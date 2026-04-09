@@ -197,26 +197,20 @@ export class MaterialsService {
     });
 
     if (!material) {
-      throw new NotFoundException('Material not found or not approved');
+      throw new NotFoundException('Material is not available for download');
     }
 
-    const download = await this.prisma.download.create({
+    await this.prisma.download.create({
       data: {
         userId,
         materialId: material.id,
-      },
-      select: {
-        id: true,
-        userId: true,
-        materialId: true,
-        downloadedAt: true,
       },
     });
 
     return {
       materialId: material.id,
       downloadUrl: this.minioService.getObjectUrl(material.fileKey),
-      downloadRecord: download,
+      message: 'Download recorded',
     };
   }
 

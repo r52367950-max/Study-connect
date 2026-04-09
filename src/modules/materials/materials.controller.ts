@@ -64,7 +64,7 @@ export class MaterialsController {
   }
 
   @Get(':id/download')
-  @ApiOperation({ summary: 'Download one approved material (login required)' })
+  @ApiOperation({ summary: 'Download approved material (auth required)' })
   @ApiParam({ name: 'id', type: String })
   download(@Param('id') id: string, @Req() req: Request) {
     return this.materialsService.downloadApprovedMaterial(id, req.user.id);
