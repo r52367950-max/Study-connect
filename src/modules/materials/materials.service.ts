@@ -3,6 +3,8 @@ import { Material, MaterialStatus, MaterialVisibility, Prisma } from '@prisma/cl
 import { randomUUID } from 'crypto';
 import { MinioService, PrismaService } from '../../infra';
 import { CreateMaterialDto } from './dto/create-material.dto';
+import { CreateRatingDto } from './dto/create-rating.dto';
+import { MaterialRatingsQueryDto } from './dto/material-ratings-query.dto';
 import { MaterialSearchQueryDto, MaterialSort } from './dto/material-search-query.dto';
 import { UploadFileInput } from './file-upload.type';
 
@@ -174,44 +176,165 @@ export class MaterialsService {
     const aggregate = await this.prisma.rating.aggregate({
       where: { materialId: material.id },
       _avg: { score: true },
+      _count: { score: true },
     });
 
     const { _count, ...base } = material;
     return {
       ...base,
       avg_score: aggregate._avg.score ?? null,
+      rating_count: aggregate._count.score,
       download_count: _count.downloads,
     };
   }
 
-  async downloadApprovedMaterial(materialId: string, userId: string) {
-    const material = await this.prisma.material.findFirst({
+  async upsertMaterialRating(params: { materialId: string; userId: string; dto: CreateRatingDto }) {
+    await this.ensureApprovedMaterial(params.materialId);
+
+    const rating = await this.prisma.rating.upsert({
       where: {
-        id: materialId,
-        status: MaterialStatus.APPROVED,
+        userId_materialId: {
+          userId: params.userId,
+          materialId: params.materialId,
+        },
       },
+      create: {
+        userId: params.userId,
+        materialId: params.materialId,
+        score: params.dto.score,
+        comment: params.dto.content,
+      },
+      update: {
+        score: params.dto.score,
+        comment: params.dto.content,
+      },
+      select: {
+        id: true,
+        userId: true,
+        materialId: true,
+        score: true,
+        comment: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    const aggregate = await this.prisma.rating.aggregate({
+      where: { materialId: params.materialId },
+      _avg: { score: true },
+      _count: { score: true },
+    });
+
+    return {
+      id: rating.id,
+      user_id: rating.userId,
+      material_id: rating.materialId,
+      score: rating.score,
+      content: rating.comment,
+      created_at: rating.createdAt,
+      updated_at: rating.updatedAt,
+      avg_score: aggregate._avg.score ?? null,
+      rating_count: aggregate._count.score,
+    };
+  }
+
+  async listApprovedMaterialRatings(materialId: string, query: MaterialRatingsQueryDto) {
+    await this.ensureApprovedMaterial(materialId);
+
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 10;
+    const skip = (page - 1) * pageSize;
+
+    const [items, total, aggregate] = await Promise.all([
+      this.prisma.rating.findMany({
+        where: { materialId },
+        skip,
+        take: pageSize,
+        orderBy: [{ createdAt: 'desc' }],
+        select: {
+          id: true,
+          userId: true,
+          materialId: true,
+          score: true,
+          comment: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+      this.prisma.rating.count({ where: { materialId } }),
+      this.prisma.rating.aggregate({
+        where: { materialId },
+        _avg: { score: true },
+        _count: { score: true },
+      }),
+    ]);
+
+    return {
+      page,
+      pageSize,
+      total,
+      avg_score: aggregate._avg.score ?? null,
+      rating_count: aggregate._count.score,
+      items: items.map((item) => ({
+        id: item.id,
+        user_id: item.userId,
+        material_id: item.materialId,
+        score: item.score,
+        content: item.comment,
+        created_at: item.createdAt,
+        updated_at: item.updatedAt,
+      })),
+    };
+  }
+
+  async downloadApprovedMaterial(materialId: string, userId: string) {
+    const material = await this.ensureApprovedMaterial(materialId, {
       select: {
         id: true,
         fileKey: true,
       },
     });
 
-    if (!material) {
-      throw new NotFoundException('Material is not available for download');
-    }
-
-    await this.prisma.download.create({
+    const download = await this.prisma.download.create({
       data: {
         userId,
         materialId: material.id,
+      },
+      select: {
+        id: true,
+        userId: true,
+        materialId: true,
+        downloadedAt: true,
       },
     });
 
     return {
       materialId: material.id,
       downloadUrl: this.minioService.getObjectUrl(material.fileKey),
-      message: 'Download recorded',
+      downloadRecord: download,
     };
+  }
+
+
+  private async ensureApprovedMaterial<TSelect extends Prisma.MaterialSelect>(
+    materialId: string,
+    options?: { select?: TSelect },
+  ): Promise<Prisma.MaterialGetPayload<{ select: TSelect }>> {
+    const select = (options?.select ?? ({ id: true } as TSelect)) as TSelect;
+
+    const material = await this.prisma.material.findFirst({
+      where: {
+        id: materialId,
+        status: MaterialStatus.APPROVED,
+      },
+      select,
+    });
+
+    if (!material) {
+      throw new NotFoundException('Material not found or not approved');
+    }
+
+    return material as Prisma.MaterialGetPayload<{ select: TSelect }>;
   }
 
   private buildApprovedWhere(query: MaterialSearchQueryDto): Prisma.MaterialWhereInput {

@@ -4,25 +4,40 @@ import { Test } from '@nestjs/testing';
 import { AppModule } from '../src/app.module';
 import { MinioService, PrismaService } from '../src/infra';
 
+type UserRole = 'USER' | 'ADMIN';
+type MaterialStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
 type DbUser = {
   id: string;
   email: string;
   username: string;
   passwordHash: string;
-  role: 'USER' | 'ADMIN';
+  role: UserRole;
 };
 
 type DbMaterial = {
   id: string;
+  title: string;
+  description: string | null;
+  stage: string | null;
+  grade: string | null;
+  subject: string | null;
+  year: number | null;
+  region: string | null;
   fileKey: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  visibility: 'PUBLIC' | 'PRIVATE';
+  status: MaterialStatus;
+  reviewComment: string | null;
+  uploaderId: string;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 type DbDownload = {
   id: string;
   userId: string;
   materialId: string;
-  createdAt: Date;
+  downloadedAt: Date;
 };
 
 class PrismaServiceMock {
@@ -42,7 +57,7 @@ class PrismaServiceMock {
       data,
       select,
     }: {
-      data: { email: string; username: string; passwordHash: string; role: 'USER' | 'ADMIN' };
+      data: { email: string; username: string; passwordHash: string; role: UserRole };
       select: { id?: boolean; email?: boolean; username?: boolean; role?: boolean };
     }) => {
       const user: DbUser = {
@@ -61,49 +76,102 @@ class PrismaServiceMock {
       };
     },
     findUnique: async ({ where }: { where: { email: string } }) => {
-      return this.users.find((user) => user.email === where.email) ?? null;
+      return this.users.find((u) => u.email === where.email) ?? null;
     },
   };
 
   material = {
-    findFirst: async ({ where, select }: { where: { id: string; status: 'APPROVED' }; select: { id: boolean; fileKey: boolean } }) => {
-      const material = this.materials.find((item) => item.id === where.id && item.status === where.status);
-      if (!material) {
+    findFirst: async ({ where, select }: { where: { id: string; status: MaterialStatus }; select: Record<string, boolean> }) => {
+      const item = this.materials.find((m) => m.id === where.id && m.status === where.status);
+      if (!item) {
         return null;
       }
-      return {
-        ...(select.id ? { id: material.id } : {}),
-        ...(select.fileKey ? { fileKey: material.fileKey } : {}),
-      };
+      const out: Record<string, unknown> = {};
+      for (const key of Object.keys(select)) {
+        if (select[key]) {
+          out[key] = (item as unknown as Record<string, unknown>)[key];
+        }
+      }
+      return out;
     },
   };
 
   download = {
-    create: async ({ data }: { data: { userId: string; materialId: string } }) => {
-      const row: DbDownload = {
+    create: async ({
+      data,
+      select,
+    }: {
+      data: { userId: string; materialId: string };
+      select: { id?: boolean; userId?: boolean; materialId?: boolean; downloadedAt?: boolean };
+    }) => {
+      const item: DbDownload = {
         id: crypto.randomUUID(),
         userId: data.userId,
         materialId: data.materialId,
-        createdAt: new Date(),
+        downloadedAt: new Date(),
       };
-      this.downloads.push(row);
-      return row;
+      this.downloads.push(item);
+
+      return {
+        ...(select.id ? { id: item.id } : {}),
+        ...(select.userId ? { userId: item.userId } : {}),
+        ...(select.materialId ? { materialId: item.materialId } : {}),
+        ...(select.downloadedAt ? { downloadedAt: item.downloadedAt } : {}),
+      };
     },
   };
 
-  seedMaterials() {
+  rating = {
+    groupBy: async () => [],
+    aggregate: async () => ({ _avg: { score: null } }),
+  };
+
+  seedMaterials(uploaderId: string): { approvedId: string; pendingId: string } {
     const approvedId = crypto.randomUUID();
     const pendingId = crypto.randomUUID();
+    const now = new Date();
 
     this.materials.push(
-      { id: approvedId, fileKey: 'materials/approved.pdf', status: 'APPROVED' },
-      { id: pendingId, fileKey: 'materials/pending.pdf', status: 'PENDING' },
+      {
+        id: approvedId,
+        title: 'Approved Material',
+        description: 'approved',
+        stage: null,
+        grade: null,
+        subject: null,
+        year: null,
+        region: null,
+        fileKey: 'approved/file.pdf',
+        visibility: 'PUBLIC',
+        status: 'APPROVED',
+        reviewComment: 'ok',
+        uploaderId,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: pendingId,
+        title: 'Pending Material',
+        description: 'pending',
+        stage: null,
+        grade: null,
+        subject: null,
+        year: null,
+        region: null,
+        fileKey: 'pending/file.pdf',
+        visibility: 'PUBLIC',
+        status: 'PENDING',
+        reviewComment: null,
+        uploaderId,
+        createdAt: now,
+        updatedAt: now,
+      },
     );
 
     return { approvedId, pendingId };
   }
 
-  snapshotDownloads() {
+  debugDownloads(): DbDownload[] {
     return this.downloads;
   }
 }
@@ -122,7 +190,6 @@ async function run(): Promise<void> {
   process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'task6-secret';
 
   const prismaMock = new PrismaServiceMock();
-  const ids = prismaMock.seedMaterials();
 
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
@@ -142,12 +209,7 @@ async function run(): Promise<void> {
   const port = typeof address === 'string' ? 3000 : address.port;
   const base = `http://127.0.0.1:${port}`;
 
-  const guestRes = await fetch(`${base}/materials/${ids.approvedId}/download`);
-  const guestBody = await guestRes.text();
-  console.log('guest download status:', guestRes.status);
-  console.log('guest download body:', guestBody);
-
-  await fetch(`${base}/auth/register`, {
+  const registerRes = await fetch(`${base}/auth/register`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -156,32 +218,34 @@ async function run(): Promise<void> {
       password: 'StrongPass123!',
     }),
   });
+  const registered = (await registerRes.json()) as { id: string };
+
+  const seeded = prismaMock.seedMaterials(registered.id);
+
+  const guestDownload = await fetch(`${base}/materials/${seeded.approvedId}/download`);
+  console.log('guest download status:', guestDownload.status);
+  console.log('guest download body:', await guestDownload.text());
 
   const loginRes = await fetch(`${base}/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      email: 'downloader@example.com',
-      password: 'StrongPass123!',
-    }),
+    body: JSON.stringify({ email: 'downloader@example.com', password: 'StrongPass123!' }),
   });
   const loginBody = (await loginRes.json()) as { accessToken: string };
 
-  const approvedRes = await fetch(`${base}/materials/${ids.approvedId}/download`, {
+  const approvedRes = await fetch(`${base}/materials/${seeded.approvedId}/download`, {
     headers: { authorization: `Bearer ${loginBody.accessToken}` },
   });
-  const approvedBody = await approvedRes.text();
   console.log('approved download status:', approvedRes.status);
-  console.log('approved download body:', approvedBody);
+  console.log('approved download body:', await approvedRes.text());
 
-  const rejectedRes = await fetch(`${base}/materials/${ids.pendingId}/download`, {
+  const pendingRes = await fetch(`${base}/materials/${seeded.pendingId}/download`, {
     headers: { authorization: `Bearer ${loginBody.accessToken}` },
   });
-  const rejectedBody = await rejectedRes.text();
-  console.log('pending download status:', rejectedRes.status);
-  console.log('pending download body:', rejectedBody);
+  console.log('pending download status:', pendingRes.status);
+  console.log('pending download body:', await pendingRes.text());
 
-  console.log('downloads snapshot:', JSON.stringify(prismaMock.snapshotDownloads()));
+  console.log('db downloads snapshot:', JSON.stringify(prismaMock.debugDownloads()));
 
   await app.close();
 }

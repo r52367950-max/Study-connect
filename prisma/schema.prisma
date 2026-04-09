@@ -77,12 +77,14 @@ model Rating {
   score       Int
   comment     String?
   createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   material    Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)
 
   @@unique([userId, materialId])
   @@index([materialId])
+  @@index([materialId, createdAt])
   @@map("ratings")
 }
 
@@ -90,7 +92,7 @@ model Download {
   id           String    @id @default(uuid()) @db.Uuid
   userId       String    @map("user_id") @db.Uuid
   materialId   String    @map("material_id") @db.Uuid
-  createdAt    DateTime  @default(now()) @map("created_at")
+  downloadedAt DateTime  @default(now()) @map("downloaded_at")
 
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   material     Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)

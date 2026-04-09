@@ -14,7 +14,8 @@
     "test:min-material-upload": "ts-node scripts/min-material-upload-check.ts",
     "test:min-admin-review": "ts-node scripts/min-admin-review-check.ts",
     "test:min-material-search": "ts-node scripts/min-material-search-check.ts",
-    "test:min-material-download": "ts-node scripts/min-material-download-check.ts"
+    "test:min-material-download": "ts-node scripts/min-material-download-check.ts",
+    "test:min-material-rating": "ts-node scripts/min-material-rating-check.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.0",
