@@ -7,7 +7,7 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
-    "lint": "eslint \"{src,prisma}/**/*.ts\"",
+    "lint": "tsc --noEmit -p tsconfig.json",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "test:min-auth": "ts-node scripts/min-auth-check.ts",
@@ -15,7 +15,10 @@
     "test:min-admin-review": "ts-node scripts/min-admin-review-check.ts",
     "test:min-material-search": "ts-node scripts/min-material-search-check.ts",
     "test:min-material-download": "ts-node scripts/min-material-download-check.ts",
-    "test:min-material-rating": "ts-node scripts/min-material-rating-check.ts"
+    "test:min-material-rating": "ts-node scripts/min-material-rating-check.ts",
+    "check:prisma": "DATABASE_URL=\"postgresql://postgres:postgres@localhost:5432/study_connect?schema=public\" prisma validate",
+    "check:quality": "npm run lint && npm run build && npm run check:prisma",
+    "test:min-all": "node scripts/min-all-runner.cjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.0",

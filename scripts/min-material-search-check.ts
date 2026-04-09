@@ -212,6 +212,9 @@ class PrismaServiceMock {
         _avg: {
           score: avg,
         },
+        _count: {
+          score: materialRatings.length,
+        },
       };
     },
   };
