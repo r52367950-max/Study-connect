@@ -2,7 +2,8 @@
   "name": "study-connect-dev",
   "dockerComposeFile": "../docker-compose.yml",
   "service": "api",
-  "workspaceFolder": "/app",
+  "workspaceFolder": "/workspace/Study-connect",
+  "shutdownAction": "stopCompose",
   "customizations": {
     "vscode": {
       "extensions": [
