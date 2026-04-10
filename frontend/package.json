@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:frontend:min": "vitest run src/__tests__"
   },
   "dependencies": {
     "next": "14.2.29",
@@ -43,6 +46,9 @@
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.47",
     "eslint": "^8.57.0",
-    "eslint-config-next": "14.2.29"
+    "eslint-config-next": "14.2.29",
+    "vitest": "^2.1.1",
+    "jsdom": "^25.0.0",
+    "@vitest/coverage-v8": "^2.1.1"
   }
 }

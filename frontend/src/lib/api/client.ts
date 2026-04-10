@@ -15,19 +15,41 @@ apiClient.interceptors.request.use((config) => {
   return config
 })
 
+// ─── 403 handler (exported for unit testing) ─────────────────────────────────
+/**
+ * Handles a 403 response based on which endpoint was called.
+ * - /admin/* → redirect to /materials?forbidden=1 (admin guard feedback)
+ * - others   → no redirect; error propagates to the calling component
+ */
+export function handle403(requestUrl: string): void {
+  if (typeof window === 'undefined') return
+  if (requestUrl.startsWith('/admin')) {
+    window.location.href = '/materials?forbidden=1'
+  }
+  // Non-admin 403: let getErrorMessage('无访问权限') surface in the component
+}
+
 // ─── Response: handle common error codes ─────────────────────────────────────
 apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
-    if (error.response?.status === 401) {
+    const status = error.response?.status
+
+    if (status === 401) {
       // Clear persisted auth and redirect to login
       if (typeof window !== 'undefined') {
         localStorage.removeItem('auth-storage')
         document.cookie = 'auth-token=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/'
+        document.cookie = 'auth-role=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/'
         const redirect = encodeURIComponent(window.location.pathname)
         window.location.href = `/login?redirect=${redirect}`
       }
     }
+
+    if (status === 403) {
+      handle403(error.config?.url ?? '')
+    }
+
     return Promise.reject(error)
   },
 )

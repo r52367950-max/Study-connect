@@ -1,18 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-// Routes that require a logged-in user
-const AUTH_REQUIRED = ['/upload', '/profile', '/admin']
+import { getRedirectUrl } from '@/lib/auth-guard'
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
   const token = request.cookies.get('auth-token')?.value
+  const role = request.cookies.get('auth-role')?.value
 
-  const needsAuth = AUTH_REQUIRED.some((p) => pathname.startsWith(p))
-
-  if (needsAuth && !token) {
-    const loginUrl = new URL('/login', request.url)
-    loginUrl.searchParams.set('redirect', pathname)
-    return NextResponse.redirect(loginUrl)
+  const redirectTo = getRedirectUrl(pathname, token, role)
+  if (redirectTo) {
+    return NextResponse.redirect(new URL(redirectTo, request.url))
   }
 
   return NextResponse.next()
