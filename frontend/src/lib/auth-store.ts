@@ -28,10 +28,12 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       setAuth: (token: string, user: User) => {
         setCookie('auth-token', token, 7)
+        setCookie('auth-role', user.role, 7) // used by middleware for admin guard
         set({ token, user })
       },
       clearAuth: () => {
         deleteCookie('auth-token')
+        deleteCookie('auth-role')
         set({ token: null, user: null })
       },
     }),
