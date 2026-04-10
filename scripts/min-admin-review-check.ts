@@ -5,7 +5,7 @@ import { AppModule } from '../src/app.module';
 import { MinioService, PrismaService } from '../src/infra';
 
 type UserRole = 'USER' | 'ADMIN';
-type MaterialStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+type MaterialStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'OFFLINE';
 
 type DbUser = {
   id: string;
@@ -147,7 +147,7 @@ class PrismaServiceMock {
       select,
     }: {
       where: { id: string };
-      data: { status: MaterialStatus; reviewComment: string };
+      data: { status: MaterialStatus; reviewComment?: string };
       select: Record<string, boolean>;
     }) => {
       const material = this.materials.find((m) => m.id === where.id);
@@ -155,7 +155,7 @@ class PrismaServiceMock {
         throw new Error('not found');
       }
       material.status = data.status;
-      material.reviewComment = data.reviewComment;
+material.reviewComment = data.reviewComment ?? null;
       material.updatedAt = new Date();
       return this.pick(material, select);
     },
@@ -292,7 +292,20 @@ async function run(): Promise<void> {
   console.log('reject status:', rejectRes.status);
   console.log('reject body:', rejectText);
 
-  console.log('db approved material:', JSON.stringify(prismaMock.debugMaterialById(materialApproveId)));
+
+  const offlineRes = await fetch(`${base}/admin/materials/${materialApproveId}/offline`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ reviewComment: 'Taken down by admin' }),
+  });
+  const offlineText = await offlineRes.text();
+  console.log('offline status:', offlineRes.status);
+  console.log('offline body:', offlineText);
+
+  console.log('db offlined material:', JSON.stringify(prismaMock.debugMaterialById(materialApproveId)));
   console.log('db rejected material:', JSON.stringify(prismaMock.debugMaterialById(materialRejectId)));
 
   await app.close();

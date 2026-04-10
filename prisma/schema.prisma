@@ -21,6 +21,7 @@ enum MaterialStatus {
   PENDING
   APPROVED
   REJECTED
+  OFFLINE
 }
 
 model User {

@@ -1,5 +1,5 @@
 /// <reference path="../src/types/express.d.ts" />
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/infra';
@@ -20,7 +20,6 @@ class PrismaServiceMock {
       const found = this.users.find((user) =>
         where.OR.some((cond) => cond.email === user.email || cond.username === user.username),
       );
-
       return found ?? null;
     },
 
@@ -52,16 +51,30 @@ class PrismaServiceMock {
       return this.users.find((user) => user.email === where.email) ?? null;
     },
   };
+
+  setUserRole(email: string, role: 'USER' | 'ADMIN') {
+    const user = this.users.find((item) => item.email === email);
+    if (user) {
+      user.role = role;
+    }
+  }
+
+  material = {
+    findMany: async () => [],
+    count: async () => 0,
+  };
 }
 
 async function run(): Promise<void> {
   process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'test-secret';
 
+  const prismaMock = new PrismaServiceMock();
+
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
   })
     .overrideProvider(PrismaService)
-    .useValue(new PrismaServiceMock())
+    .useValue(prismaMock)
     .compile();
 
   const app = moduleRef.createNestApplication();
@@ -81,7 +94,7 @@ async function run(): Promise<void> {
   const port = typeof address === 'string' ? 3000 : address.port;
   const base = `http://127.0.0.1:${port}`;
 
-  const registerRes = await fetch(`${base}/auth/register`, {
+  await fetch(`${base}/auth/register`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -90,38 +103,52 @@ async function run(): Promise<void> {
       password: 'StrongPass123!',
     }),
   });
-  const registerJson = (await registerRes.json()) as { accessToken: string };
 
-  const loginRes = await fetch(`${base}/auth/login`, {
+  await fetch(`${base}/auth/register`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      email: 'student@example.com',
+      email: 'admin@example.com',
+      username: 'admin',
       password: 'StrongPass123!',
     }),
   });
-  const loginJson = (await loginRes.json()) as { accessToken: string };
+
+  prismaMock.setUserRole('admin@example.com', 'ADMIN');
+
+  const loginUserRes = await fetch(`${base}/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'student@example.com', password: 'StrongPass123!' }),
+  });
+  const loginUserJson = (await loginUserRes.json()) as { accessToken: string };
+
+  const loginAdminRes = await fetch(`${base}/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'admin@example.com', password: 'StrongPass123!' }),
+  });
+  const loginAdminJson = (await loginAdminRes.json()) as { accessToken: string };
 
   const meRes = await fetch(`${base}/auth/me`, {
-    headers: {
-      authorization: `Bearer ${loginJson.accessToken}`,
-    },
+    headers: { authorization: `Bearer ${loginUserJson.accessToken}` },
   });
-  const meBody = await meRes.text();
 
-  const adminRes = await fetch(`${base}/admin/ping`, {
-    headers: {
-      authorization: `Bearer ${loginJson.accessToken}`,
-    },
+  const adminByUserRes = await fetch(`${base}/admin/materials/pending?page=1&pageSize=10`, {
+    headers: { authorization: `Bearer ${loginUserJson.accessToken}` },
   });
-  const adminBody = await adminRes.text();
 
-  console.log('register status:', registerRes.status);
-  console.log('login status:', loginRes.status);
-  console.log('me status:', meRes.status, 'body:', meBody);
-  console.log('admin status:', adminRes.status, 'body:', adminBody);
-  console.log('register token exists:', Boolean(registerJson.accessToken));
-  console.log('login token exists:', Boolean(loginJson.accessToken));
+  const adminByAdminRes = await fetch(`${base}/admin/materials/pending?page=1&pageSize=10`, {
+    headers: { authorization: `Bearer ${loginAdminJson.accessToken}` },
+  });
+
+  console.log('user login status:', loginUserRes.status);
+  console.log('admin login status:', loginAdminRes.status);
+  console.log('me status:', meRes.status, 'body:', await meRes.text());
+  console.log('admin by USER status:', adminByUserRes.status, 'body:', await adminByUserRes.text());
+  console.log('admin by ADMIN status:', adminByAdminRes.status, 'body:', await adminByAdminRes.text());
+  console.log('user token exists:', Boolean(loginUserJson.accessToken));
+  console.log('admin token exists:', Boolean(loginAdminJson.accessToken));
 
   await app.close();
 }

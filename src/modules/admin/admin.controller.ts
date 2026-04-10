@@ -8,6 +8,7 @@ import {
 import { UserRole } from '@prisma/client';
 import { Request } from 'express';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { OfflineMaterialDto } from './dto/offline-material.dto';
 import { PendingMaterialsQueryDto } from './dto/pending-materials-query.dto';
 import { RejectMaterialDto } from './dto/reject-material.dto';
 import { AdminService } from './admin.service';
@@ -38,6 +39,13 @@ export class AdminController {
   })
   approve(@Param('id') id: string, @Req() req: Request) {
     return this.adminService.approveMaterial(id, req.user.id);
+  }
+
+
+  @Post('materials/:id/offline')
+  @ApiOperation({ summary: 'Offline one material' })
+  offline(@Param('id') id: string, @Body() dto: OfflineMaterialDto, @Req() req: Request) {
+    return this.adminService.offlineMaterial(id, req.user.id, dto.reviewComment);
   }
 
   @Post('materials/:id/reject')

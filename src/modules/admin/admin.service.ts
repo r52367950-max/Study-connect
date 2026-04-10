@@ -46,6 +46,14 @@ export class AdminService {
     });
   }
 
+
+  async offlineMaterial(materialId: string, adminId: string, reviewComment?: string) {
+    return this.updateMaterialReview(materialId, {
+      status: MaterialStatus.OFFLINE,
+      reviewComment: reviewComment?.trim() || `Offline by ${adminId}`,
+    });
+  }
+
   async rejectMaterial(materialId: string, reason: string, adminId: string) {
     return this.updateMaterialReview(materialId, {
       status: MaterialStatus.REJECTED,
