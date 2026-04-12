@@ -43,7 +43,7 @@ export function getFileTypeLabel(fileKey: string): string {
     zip: 'ZIP',
     txt: 'TXT',
   }
-  return map[ext] ?? ext.toUpperCase() || '文件'
+  return (map[ext] ?? ext.toUpperCase()) || '文件'
 }
 
 export function buildQueryString(params: Record<string, unknown>): string {
