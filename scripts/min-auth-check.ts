@@ -121,34 +121,49 @@ async function run(): Promise<void> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ email: 'student@example.com', password: 'StrongPass123!' }),
   });
-  const loginUserJson = (await loginUserRes.json()) as { accessToken: string };
+  const loginUserJson = (await loginUserRes.json()) as { user: { id: string } };
+  const userCookie = loginUserRes.headers.get('set-cookie') ?? '';
 
   const loginAdminRes = await fetch(`${base}/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ email: 'admin@example.com', password: 'StrongPass123!' }),
   });
-  const loginAdminJson = (await loginAdminRes.json()) as { accessToken: string };
+  const loginAdminJson = (await loginAdminRes.json()) as { user: { id: string } };
+  const adminCookie = loginAdminRes.headers.get('set-cookie') ?? '';
 
   const meRes = await fetch(`${base}/auth/me`, {
-    headers: { authorization: `Bearer ${loginUserJson.accessToken}` },
+    headers: { cookie: userCookie },
   });
 
   const adminByUserRes = await fetch(`${base}/admin/materials/pending?page=1&pageSize=10`, {
-    headers: { authorization: `Bearer ${loginUserJson.accessToken}` },
+    headers: { cookie: userCookie },
   });
 
   const adminByAdminRes = await fetch(`${base}/admin/materials/pending?page=1&pageSize=10`, {
-    headers: { authorization: `Bearer ${loginAdminJson.accessToken}` },
+    headers: { cookie: adminCookie },
+  });
+
+  const logoutRes = await fetch(`${base}/auth/logout`, {
+    method: 'POST',
+    headers: { cookie: userCookie },
+  });
+
+  const meAfterLogoutRes = await fetch(`${base}/auth/me`, {
+    headers: { cookie: logoutRes.headers.get('set-cookie') ?? '' },
   });
 
   console.log('user login status:', loginUserRes.status);
   console.log('admin login status:', loginAdminRes.status);
   console.log('me status:', meRes.status, 'body:', await meRes.text());
+  console.log('logout status:', logoutRes.status);
+  console.log('me after logout status:', meAfterLogoutRes.status, 'body:', await meAfterLogoutRes.text());
   console.log('admin by USER status:', adminByUserRes.status, 'body:', await adminByUserRes.text());
   console.log('admin by ADMIN status:', adminByAdminRes.status, 'body:', await adminByAdminRes.text());
-  console.log('user token exists:', Boolean(loginUserJson.accessToken));
-  console.log('admin token exists:', Boolean(loginAdminJson.accessToken));
+  console.log('user login has user profile:', Boolean(loginUserJson.user?.id));
+  console.log('admin login has user profile:', Boolean(loginAdminJson.user?.id));
+  console.log('user cookie set:', Boolean(userCookie));
+  console.log('admin cookie set:', Boolean(adminCookie));
 
   await app.close();
 }

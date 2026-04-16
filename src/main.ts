@@ -14,6 +14,11 @@ async function bootstrap() {
     }),
   );
 
+  app.enableCors({
+    origin: process.env.CORS_ORIGIN?.split(',').map((origin) => origin.trim()) ?? true,
+    credentials: true,
+  });
+
   const config = new DocumentBuilder()
     .setTitle('Study Connect API')
     .setDescription('API documentation for Study Connect backend services')

@@ -19,22 +19,15 @@ export function requiresAdmin(pathname: string): boolean {
  * Returns the redirect URL if access should be denied, or `null` if allowed.
  *
  * @param pathname - The requested pathname (e.g. `/admin`)
- * @param token    - Value of the `auth-token` cookie (undefined = not set)
- * @param role     - Value of the `auth-role` cookie   (undefined = not set)
+ * @param token - Value of the `auth-token` HttpOnly cookie (undefined = not set)
  */
 export function getRedirectUrl(
   pathname: string,
   token: string | undefined,
-  role: string | undefined,
 ): string | null {
   // 1. Unauthenticated → send to login
   if (requiresAuth(pathname) && !token) {
     return `/login?redirect=${encodeURIComponent(pathname)}`
-  }
-
-  // 2. Authenticated but not ADMIN → send to materials with forbidden flag
-  if (requiresAdmin(pathname) && role !== 'ADMIN') {
-    return '/materials?forbidden=1'
   }
 
   return null

@@ -1,18 +1,10 @@
 import axios, { AxiosError } from 'axios'
-import { getToken } from '@/lib/auth-store'
+import { useAuthStore } from '@/lib/auth-store'
 
 export const apiClient = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000',
   timeout: 20000,
-})
-
-// ─── Request: attach Bearer token ────────────────────────────────────────────
-apiClient.interceptors.request.use((config) => {
-  const token = getToken()
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
+  withCredentials: true,
 })
 
 // ─── 403 handler (exported for unit testing) ─────────────────────────────────
@@ -36,11 +28,9 @@ apiClient.interceptors.response.use(
     const status = error.response?.status
 
     if (status === 401) {
-      // Clear persisted auth and redirect to login
+      // Clear in-memory auth state and redirect to login
       if (typeof window !== 'undefined') {
-        localStorage.removeItem('auth-storage')
-        document.cookie = 'auth-token=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/'
-        document.cookie = 'auth-role=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/'
+        useAuthStore.getState().clearAuth()
         const redirect = encodeURIComponent(window.location.pathname)
         window.location.href = `/login?redirect=${redirect}`
       }

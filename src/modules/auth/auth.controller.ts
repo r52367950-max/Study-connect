@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -6,7 +6,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { Public } from './decorators/public.decorator';
 import { Roles } from './decorators/roles.decorator';
 import { AuthResponseDto, AuthUserDto } from './dto/auth-response.dto';
@@ -24,16 +24,46 @@ export class AuthController {
   @Post('register')
   @ApiOperation({ summary: 'Register a new user account' })
   @ApiOkResponse({ type: AuthResponseDto })
-  register(@Body() dto: RegisterDto): Promise<AuthResponseDto> {
-    return this.authService.register(dto);
+  async register(
+    @Body() dto: RegisterDto,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<AuthResponseDto> {
+    const authResult = await this.authService.register(dto);
+    this.setAuthCookie(response, authResult.accessToken);
+    return { user: authResult.user };
   }
 
   @Public()
   @Post('login')
-  @ApiOperation({ summary: 'Login and get JWT access token' })
+  @ApiOperation({ summary: 'Login and set JWT access token in HttpOnly cookie' })
   @ApiOkResponse({ type: AuthResponseDto })
-  login(@Body() dto: LoginDto): Promise<AuthResponseDto> {
-    return this.authService.login(dto);
+  async login(
+    @Body() dto: LoginDto,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<AuthResponseDto> {
+    const authResult = await this.authService.login(dto);
+    this.setAuthCookie(response, authResult.accessToken);
+    return { user: authResult.user };
+  }
+
+  @Public()
+  @Post('logout')
+  @ApiOperation({ summary: 'Clear JWT auth cookie' })
+  @ApiOkResponse({
+    schema: {
+      properties: {
+        success: { type: 'boolean', example: true },
+      },
+    },
+  })
+  logout(@Res({ passthrough: true }) response: Response): { success: true } {
+    response.clearCookie('auth-token', {
+      httpOnly: true,
+      secure: this.getCookieSecure(),
+      sameSite: this.getCookieSameSite(),
+      path: '/',
+    });
+    return { success: true };
   }
 
   @Get('me')
@@ -50,5 +80,27 @@ export class AuthController {
       username: user.username,
       role: user.role,
     };
+  }
+
+  private setAuthCookie(response: Response, token: string): void {
+    response.cookie('auth-token', token, {
+      httpOnly: true,
+      secure: this.getCookieSecure(),
+      sameSite: this.getCookieSameSite(),
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+  }
+
+  private getCookieSecure(): boolean {
+    return process.env.AUTH_COOKIE_SECURE === 'true';
+  }
+
+  private getCookieSameSite(): 'lax' | 'strict' | 'none' {
+    const sameSite = (process.env.AUTH_COOKIE_SAMESITE ?? 'lax').toLowerCase();
+    if (sameSite === 'strict' || sameSite === 'none') {
+      return sameSite;
+    }
+    return 'lax';
   }
 }

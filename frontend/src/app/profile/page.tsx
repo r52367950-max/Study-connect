@@ -20,11 +20,11 @@ import { formatDate } from '@/lib/utils'
 
 export default function ProfilePage() {
   const router = useRouter()
-  const { isLoggedIn, user, logout } = useAuth()
+  const { initialized, isLoggedIn, user, logout } = useAuth()
 
   useEffect(() => {
-    if (!isLoggedIn) router.replace('/login?redirect=/profile')
-  }, [isLoggedIn, router])
+    if (initialized && !isLoggedIn) router.replace('/login?redirect=/profile')
+  }, [initialized, isLoggedIn, router])
 
   const { data: meData } = useQuery({
     queryKey: ['me'],
@@ -32,7 +32,7 @@ export default function ProfilePage() {
     enabled: isLoggedIn,
   })
 
-  if (!isLoggedIn || !user) return <PageLoader />
+  if (!initialized || !isLoggedIn || !user) return <PageLoader />
 
   const currentUser = meData ?? user
 

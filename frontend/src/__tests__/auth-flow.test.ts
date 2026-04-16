@@ -15,8 +15,7 @@ describe('auth flow regression', () => {
   const originalAdapter = apiClient.defaults.adapter
 
   beforeEach(() => {
-    localStorage.clear()
-    useAuthStore.setState({ token: null, user: null })
+    useAuthStore.setState({ user: null })
   })
 
   afterEach(() => {
@@ -24,23 +23,21 @@ describe('auth flow regression', () => {
     apiClient.defaults.adapter = originalAdapter
   })
 
-  it('stores a defined token after login success', async () => {
+  it('stores user state after login success without persisting token', async () => {
     vi.spyOn(apiClient, 'post').mockResolvedValueOnce({
       data: {
-        accessToken: 'token-from-login',
         user: mockUser,
       },
     } as never)
 
     const data = await login({ email: mockUser.email, password: 'password123' })
-    useAuthStore.getState().setAuth(data.accessToken, data.user)
+    useAuthStore.getState().setAuth(data.user)
 
-    expect(useAuthStore.getState().token).toBeDefined()
-    expect(useAuthStore.getState().token).toBe('token-from-login')
+    expect(useAuthStore.getState().user).toEqual(mockUser)
   })
 
-  it('attaches Authorization header for /auth/me requests', async () => {
-    useAuthStore.getState().setAuth('token-for-me', mockUser)
+  it('uses credentialed request for /auth/me without Authorization header', async () => {
+    useAuthStore.getState().setAuth(mockUser)
 
     const adapter = vi.fn(async (config) => ({
       data: mockUser,
@@ -60,6 +57,7 @@ describe('auth flow regression', () => {
         : requestConfig.headers?.Authorization
 
     expect(requestConfig.url).toBe('/auth/me')
-    expect(authHeader).toBe('Bearer token-for-me')
+    expect(requestConfig.withCredentials).toBe(true)
+    expect(authHeader).toBeUndefined()
   })
 })
