@@ -302,7 +302,7 @@ export class MaterialsService {
 
     return {
       materialId: material.id,
-      downloadUrl: this.minioService.getObjectUrl(material.fileKey),
+      downloadUrl: this.minioService.getSignedDownloadUrl(material.fileKey),
       downloadRecord: download,
     };
   }
