@@ -100,6 +100,24 @@ src/
 └── types/                # TypeScript 类型定义
 ```
 
+
+## CI / 本地门禁命令
+
+以下命令均可在 **无外网** 环境执行（已改为本地系统字体栈，ESLint 也无需交互初始化）：
+
+```bash
+cd frontend
+npm run build
+npm run lint
+npm run test:frontend:min
+```
+
+推荐在提交前执行一遍本地最小门禁：
+
+```bash
+cd frontend && npm run lint && npm run build && npm run test:frontend:min
+```
+
 ## 手工验证清单
 
 ### 游客流程
