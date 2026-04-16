@@ -14,7 +14,6 @@ export interface User {
 // ─── Auth ────────────────────────────────────────────────────────────────────
 
 export interface AuthResponse {
-  accessToken: string
   user: User
 }
 

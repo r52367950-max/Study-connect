@@ -30,7 +30,7 @@ export class JwtAuthGuard implements CanActivate {
     const token = this.extractToken(request);
 
     if (!token) {
-      throw new UnauthorizedException('Missing bearer token');
+      throw new UnauthorizedException('Missing auth cookie');
     }
 
     request.user = await this.authService.verifyAccessToken(token);
@@ -38,10 +38,19 @@ export class JwtAuthGuard implements CanActivate {
   }
 
   private extractToken(request: Request): string | null {
-    const [type, token] = (request.headers.authorization ?? '').split(' ');
-    if (type !== 'Bearer' || !token) {
+    const cookieHeader = request.headers.cookie;
+    if (!cookieHeader) {
       return null;
     }
-    return token;
+
+    const cookieEntries = cookieHeader.split(';');
+    for (const entry of cookieEntries) {
+      const [rawName, ...rawValue] = entry.trim().split('=');
+      if (rawName === 'auth-token' && rawValue.length > 0) {
+        return decodeURIComponent(rawValue.join('='));
+      }
+    }
+
+    return null;
   }
 }
