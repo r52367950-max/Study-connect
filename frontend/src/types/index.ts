@@ -113,7 +113,7 @@ export interface UploadMaterialPayload {
 
 export interface CreateRatingPayload {
   score: number
-  comment?: string
+  content?: string
 }
 
 export interface AdminPendingItem {
