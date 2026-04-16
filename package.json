@@ -19,7 +19,8 @@
     "check:prisma": "DATABASE_URL=\"postgresql://postgres:postgres@localhost:5432/study_connect?schema=public\" prisma validate",
     "check:quality": "npm run lint && npm run build && npm run check:prisma",
     "test:min-all": "node scripts/min-all-runner.cjs",
-    "test:min-admin-update-review-errors": "ts-node scripts/min-admin-update-material-review-error-check.ts"
+    "test:min-admin-update-review-errors": "ts-node scripts/min-admin-update-material-review-error-check.ts",
+    "test:min-material-upload-size-boundary": "ts-node scripts/min-material-upload-size-boundary-check.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.0",
