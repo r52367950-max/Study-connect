@@ -38,7 +38,7 @@ export default function LoginPage() {
   const { mutate, isPending } = useMutation({
     mutationFn: login,
     onSuccess: (data) => {
-      setAuth(data.access_token, data.user)
+      setAuth(data.accessToken, data.user)
       router.replace(redirect)
     },
     onError: (err) => {
