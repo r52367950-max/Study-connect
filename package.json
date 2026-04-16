@@ -18,7 +18,8 @@
     "test:min-material-rating": "ts-node scripts/min-material-rating-check.ts",
     "check:prisma": "DATABASE_URL=\"postgresql://postgres:postgres@localhost:5432/study_connect?schema=public\" prisma validate",
     "check:quality": "npm run lint && npm run build && npm run check:prisma",
-    "test:min-all": "node scripts/min-all-runner.cjs"
+    "test:min-all": "node scripts/min-all-runner.cjs",
+    "test:min-admin-update-review-errors": "ts-node scripts/min-admin-update-material-review-error-check.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.0",
