@@ -1,9 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
 import { MaterialStatus } from '@prisma/client';
 import { PrismaService } from '../../infra';
 
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async getPendingMaterials(page: number, pageSize: number) {
@@ -46,7 +48,6 @@ export class AdminService {
     });
   }
 
-
   async offlineMaterial(materialId: string, adminId: string, reviewComment?: string) {
     return this.updateMaterialReview(materialId, {
       status: MaterialStatus.OFFLINE,
@@ -79,8 +80,37 @@ export class AdminService {
           updatedAt: true,
         },
       });
-    } catch {
-      throw new NotFoundException('Material not found');
+    } catch (error) {
+      this.logger.error(
+        `Failed to update material review (materialId=${materialId}, targetStatus=${data.status}, errorType=${this.getErrorType(error)})`,
+        error instanceof Error ? error.stack : undefined,
+      );
+
+      if (this.isRecordNotFoundError(error)) {
+        throw new NotFoundException('Material not found');
+      }
+
+      throw new InternalServerErrorException('Failed to update material review');
     }
+  }
+
+  private isRecordNotFoundError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
+    const maybeCode = (error as { code?: unknown }).code;
+    return maybeCode === 'P2025';
+  }
+
+  private getErrorType(error: unknown): string {
+    if (error && typeof error === 'object' && 'constructor' in error) {
+      const constructorName = (error as { constructor?: { name?: string } }).constructor?.name;
+      if (constructorName) {
+        return constructorName;
+      }
+    }
+
+    return typeof error;
   }
 }
