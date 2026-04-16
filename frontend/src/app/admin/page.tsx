@@ -133,7 +133,7 @@ export default function AdminPage() {
                 </div>
                 <p className="font-medium text-sm line-clamp-1">{item.title}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {item.uploader?.username} · {formatRelativeTime(item.createdAt)}
+                  {item.uploader.username} · {formatRelativeTime(item.createdAt)}
                 </p>
               </div>
 

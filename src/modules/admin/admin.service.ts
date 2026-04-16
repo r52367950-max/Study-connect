@@ -18,12 +18,15 @@ export class AdminService {
         select: {
           id: true,
           title: true,
-          description: true,
-          status: true,
-          reviewComment: true,
-          uploaderId: true,
+          subject: true,
+          stage: true,
+          grade: true,
           createdAt: true,
-          updatedAt: true,
+          uploader: {
+            select: {
+              username: true,
+            },
+          },
         },
       }),
       this.prisma.material.count({

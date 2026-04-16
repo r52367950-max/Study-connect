@@ -119,10 +119,9 @@ export interface CreateRatingPayload {
 export interface AdminPendingItem {
   id: string
   title: string
-  subject?: string | null
-  stage?: string | null
-  grade?: string | null
-  status: MaterialStatus
+  subject: string | null
+  stage: string | null
+  grade: string | null
   createdAt: string
-  uploader?: Pick<User, 'id' | 'username'>
+  uploader: Pick<User, 'username'>
 }
