@@ -41,6 +41,27 @@ const ALLOWED_MIME_TYPES = [
   'text/plain',
 ];
 
+const MAX_UPLOAD_SIZE_MB_KEY = 'MAX_UPLOAD_SIZE_MB';
+const DEFAULT_MAX_UPLOAD_SIZE_MB = 50;
+
+function getMaxUploadSizeMb(configService: ConfigService): number {
+  const maxUploadSizeMb = Number(
+    configService.get<string>(MAX_UPLOAD_SIZE_MB_KEY) ?? String(DEFAULT_MAX_UPLOAD_SIZE_MB),
+  );
+
+  return Number.isFinite(maxUploadSizeMb) && maxUploadSizeMb > 0
+    ? maxUploadSizeMb
+    : DEFAULT_MAX_UPLOAD_SIZE_MB;
+}
+
+function assertUploadFileSize(file: UploadFileInput, maxSizeMb: number): void {
+  const maxBytes = maxSizeMb * 1024 * 1024;
+
+  if (file.size > maxBytes) {
+    throw new UnprocessableEntityException(`UPLOAD_FILE_TOO_LARGE: max ${maxSizeMb}MB`);
+  }
+}
+
 @ApiTags('materials')
 @ApiBearerAuth()
 @Controller('materials')
@@ -64,7 +85,6 @@ export class MaterialsController {
   detail(@Param('id') id: string) {
     return this.materialsService.getApprovedDetail(id);
   }
-
 
   @Get(':id/ratings')
   @Public()
@@ -110,12 +130,9 @@ export class MaterialsController {
   })
   @UseInterceptors(
     FileInterceptor('file', {
-      limits: {
-        fileSize: 1024 * 1024 * 200,
-      },
       fileFilter: (_req, file, callback) => {
         if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
-          callback(new UnprocessableEntityException('Unsupported file type'), false);
+          callback(new UnprocessableEntityException('UNSUPPORTED_FILE_TYPE'), false);
           return;
         }
         callback(null, true);
@@ -133,12 +150,7 @@ export class MaterialsController {
     )
     file: UploadFileInput,
   ): Promise<UploadedMaterial> {
-    const maxSizeMb = Number(this.configService.get<string>('MAX_UPLOAD_SIZE_MB') ?? '50');
-    const maxBytes = maxSizeMb * 1024 * 1024;
-
-    if (file.size > maxBytes) {
-      throw new UnprocessableEntityException(`File exceeds MAX_UPLOAD_SIZE_MB=${maxSizeMb}`);
-    }
+    assertUploadFileSize(file, getMaxUploadSizeMb(this.configService));
 
     return this.materialsService.createWithFile({
       uploaderId: req.user.id,
@@ -147,3 +159,5 @@ export class MaterialsController {
     });
   }
 }
+
+export { assertUploadFileSize, getMaxUploadSizeMb, MAX_UPLOAD_SIZE_MB_KEY };
