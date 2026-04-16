@@ -103,7 +103,7 @@ src/
 
 ## CI / 本地门禁命令
 
-以下命令均可在 **无外网** 环境执行（已改为本地系统字体栈，ESLint 也无需交互初始化）：
+前端质量门禁固定为以下三条命令，CI 与本地保持一致，任一命令失败即阻断：
 
 ```bash
 cd frontend
@@ -112,10 +112,21 @@ npm run lint
 npm run test:frontend:min
 ```
 
-推荐在提交前执行一遍本地最小门禁：
+可直接使用串联脚本（与 CI 同顺序）：
 
 ```bash
-cd frontend && npm run lint && npm run build && npm run test:frontend:min
+cd frontend
+npm run quality:gate
+```
+
+### 冷启动检查（空缓存 + 非交互）
+
+用于验证在全新环境中不会触发 ESLint 初始化提示：
+
+```bash
+cd frontend
+npm ci
+npm run quality:cold-start
 ```
 
 ## 手工验证清单
