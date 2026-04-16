@@ -133,9 +133,9 @@ MAX_UPLOAD_SIZE_MB=30
 
 ## 5.2 Materials
 - `POST /materials` 上传资料（登录）
-- `GET /materials` 公开检索列表（游客可访问，仅返回 APPROVED）
-- `GET /materials/:id` 详情
-- `GET /materials/:id/download` 下载（登录）
+- `GET /materials` 公开检索列表（游客可访问，仅返回 `APPROVED + PUBLIC`）
+- `GET /materials/:id` 详情（仅 `APPROVED + PUBLIC` 对外可见）
+- `GET /materials/:id/download` 下载（登录；仅 `APPROVED + PUBLIC` 可下载）
 
 ## 5.3 Ratings
 - `POST /materials/:id/ratings` 新增或覆盖评分（登录）
@@ -242,7 +242,7 @@ MAX_UPLOAD_SIZE_MB=30
 你负责实现公开检索与详情。
 要求：
 1) GET /materials 支持 q/stage/grade/subject/year/region/sort/page/pageSize。
-2) 仅返回 APPROVED 资料。
+2) 仅返回 `APPROVED + PUBLIC` 资料（`PRIVATE + APPROVED` 对游客不可见）。
 3) GET /materials/:id 返回详情与基础统计（评分均值、下载次数）。
 4) 查询性能优先：合理索引与分页。
 验收标准：游客可访问列表与详情，能按学科和关键词过滤。
@@ -254,7 +254,7 @@ MAX_UPLOAD_SIZE_MB=30
 你负责实现下载接口。
 要求：
 1) GET /materials/:id/download 仅登录可访问。
-2) 仅 APPROVED 资料可下载。
+2) 仅 `APPROVED + PUBLIC` 资料可下载（登录用户访问 `PRIVATE + APPROVED` 返回 404）。
 3) 记录 downloads（user_id, material_id）。
 4) 返回可下载 URL 或流式下载。
 验收标准：游客请求下载返回 401，登录后可下载且有记录。
@@ -298,4 +298,3 @@ MAX_UPLOAD_SIZE_MB=30
 
 - 第一步先派发 **Task 1（脚手架）**。
 - 你把 Codex 回传结果贴给我，我来帮你审查并生成下一轮精修指令。
-

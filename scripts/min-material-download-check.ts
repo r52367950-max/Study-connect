@@ -81,8 +81,16 @@ class PrismaServiceMock {
   };
 
   material = {
-    findFirst: async ({ where, select }: { where: { id: string; status: MaterialStatus }; select: Record<string, boolean> }) => {
-      const item = this.materials.find((m) => m.id === where.id && m.status === where.status);
+    findFirst: async ({
+      where,
+      select,
+    }: {
+      where: { id: string; status: MaterialStatus; visibility?: 'PUBLIC' | 'PRIVATE' };
+      select: Record<string, boolean>;
+    }) => {
+      const item = this.materials.find(
+        (m) => m.id === where.id && m.status === where.status && (!where.visibility || m.visibility === where.visibility),
+      );
       if (!item) {
         return null;
       }
@@ -126,9 +134,10 @@ class PrismaServiceMock {
     aggregate: async () => ({ _avg: { score: null } }),
   };
 
-  seedMaterials(uploaderId: string): { approvedId: string; pendingId: string } {
+  seedMaterials(uploaderId: string): { approvedId: string; pendingId: string; privateApprovedId: string } {
     const approvedId = crypto.randomUUID();
     const pendingId = crypto.randomUUID();
+    const privateApprovedId = crypto.randomUUID();
     const now = new Date();
 
     this.materials.push(
@@ -143,6 +152,23 @@ class PrismaServiceMock {
         region: null,
         fileKey: 'approved/file.pdf',
         visibility: 'PUBLIC',
+        status: 'APPROVED',
+        reviewComment: 'ok',
+        uploaderId,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: privateApprovedId,
+        title: 'Private Approved Material',
+        description: 'private approved',
+        stage: null,
+        grade: null,
+        subject: null,
+        year: null,
+        region: null,
+        fileKey: 'private/approved.pdf',
+        visibility: 'PRIVATE',
         status: 'APPROVED',
         reviewComment: 'ok',
         uploaderId,
@@ -168,7 +194,7 @@ class PrismaServiceMock {
       },
     );
 
-    return { approvedId, pendingId };
+    return { approvedId, pendingId, privateApprovedId };
   }
 
   debugDownloads(): DbDownload[] {
@@ -244,6 +270,12 @@ async function run(): Promise<void> {
   });
   console.log('pending download status:', pendingRes.status);
   console.log('pending download body:', await pendingRes.text());
+
+  const privateApprovedRes = await fetch(`${base}/materials/${seeded.privateApprovedId}/download`, {
+    headers: { authorization: `Bearer ${loginBody.accessToken}` },
+  });
+  console.log('private approved download status:', privateApprovedRes.status);
+  console.log('private approved download body:', await privateApprovedRes.text());
 
   console.log('db downloads snapshot:', JSON.stringify(prismaMock.debugDownloads()));
 

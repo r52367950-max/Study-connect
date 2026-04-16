@@ -144,11 +144,7 @@ export class MaterialsService {
   }
 
   async getApprovedDetail(id: string) {
-    const material = await this.prisma.material.findFirst({
-      where: {
-        id,
-        status: MaterialStatus.APPROVED,
-      },
+    const material = await this.ensurePublicApprovedMaterial(id, {
       select: {
         id: true,
         title: true,
@@ -168,10 +164,6 @@ export class MaterialsService {
         },
       },
     });
-
-    if (!material) {
-      throw new NotFoundException('Material not found');
-    }
 
     const aggregate = await this.prisma.rating.aggregate({
       where: { materialId: material.id },
@@ -288,7 +280,7 @@ export class MaterialsService {
   }
 
   async downloadApprovedMaterial(materialId: string, userId: string) {
-    const material = await this.ensureApprovedMaterial(materialId, {
+    const material = await this.ensurePublicApprovedMaterial(materialId, {
       select: {
         id: true,
         fileKey: true,
@@ -337,9 +329,32 @@ export class MaterialsService {
     return material as Prisma.MaterialGetPayload<{ select: TSelect }>;
   }
 
+  private async ensurePublicApprovedMaterial<TSelect extends Prisma.MaterialSelect>(
+    materialId: string,
+    options?: { select?: TSelect },
+  ): Promise<Prisma.MaterialGetPayload<{ select: TSelect }>> {
+    const select = (options?.select ?? ({ id: true } as TSelect)) as TSelect;
+
+    const material = await this.prisma.material.findFirst({
+      where: {
+        id: materialId,
+        status: MaterialStatus.APPROVED,
+        visibility: MaterialVisibility.PUBLIC,
+      },
+      select,
+    });
+
+    if (!material) {
+      throw new NotFoundException('Material not found');
+    }
+
+    return material as Prisma.MaterialGetPayload<{ select: TSelect }>;
+  }
+
   private buildApprovedWhere(query: MaterialSearchQueryDto): Prisma.MaterialWhereInput {
     return {
       status: MaterialStatus.APPROVED,
+      visibility: MaterialVisibility.PUBLIC,
       ...(query.q
         ? {
             OR: [

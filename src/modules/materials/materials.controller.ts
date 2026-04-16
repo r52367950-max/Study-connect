@@ -52,14 +52,14 @@ export class MaterialsController {
 
   @Get()
   @Public()
-  @ApiOperation({ summary: 'Public material search (APPROVED only)' })
+  @ApiOperation({ summary: 'Public material search (APPROVED + PUBLIC only)' })
   list(@Query() query: MaterialSearchQueryDto) {
     return this.materialsService.searchApproved(query);
   }
 
   @Get(':id')
   @Public()
-  @ApiOperation({ summary: 'Public material detail (APPROVED only)' })
+  @ApiOperation({ summary: 'Public material detail (APPROVED + PUBLIC only)' })
   @ApiParam({ name: 'id', type: String })
   detail(@Param('id') id: string) {
     return this.materialsService.getApprovedDetail(id);
@@ -82,7 +82,7 @@ export class MaterialsController {
   }
 
   @Get(':id/download')
-  @ApiOperation({ summary: 'Download one approved material (login required)' })
+  @ApiOperation({ summary: 'Download one approved public material (login required; APPROVED + PUBLIC)' })
   @ApiParam({ name: 'id', type: String })
   download(@Param('id') id: string, @Req() req: Request) {
     return this.materialsService.downloadApprovedMaterial(id, req.user.id);
