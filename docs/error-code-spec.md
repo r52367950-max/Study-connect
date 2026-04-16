@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `401 Unauthorized` | 未认证 | 缺失 Bearer Token、Token 非法或过期 |
 | `403 Forbidden` | 已认证但无权限 | 角色不满足（如 USER 访问 ADMIN 接口） |
-| `404 Not Found` | 资源不可见或不存在 | 资料不存在，或资料不是 `APPROVED`（对外统一不可见） |
+| `404 Not Found` | 资源不可见或不存在 | 资料不存在，或资料不满足公开语义（`status=APPROVED` 且 `visibility=PUBLIC`） |
 | `422 Unprocessable Entity` | 参数/文件校验失败 | DTO 参数不合法、上传文件类型/大小不合法 |
 
 ## 接口场景映射
@@ -27,7 +27,7 @@
   - `422`: 文件类型不支持、文件超过 `MAX_UPLOAD_SIZE_MB`、DTO 参数不合法。
 - `GET /materials/:id/download`
   - `401`: 未登录下载。
-  - `404`: 资料不存在或未审核通过（统一错误文案：`Material not found or not approved`）。
+  - `404`: 资料不存在，或不是 `APPROVED + PUBLIC`（含 `PRIVATE + APPROVED`）。
 
 ### Admin Review
 - `GET /admin/materials/pending`

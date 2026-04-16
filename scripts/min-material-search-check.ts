@@ -111,6 +111,9 @@ class PrismaServiceMock {
       select: Record<string, unknown>;
     }) => {
       let filtered = this.materials.filter((material) => material.status === where.status);
+      if (where.visibility) {
+        filtered = filtered.filter((material) => material.visibility === where.visibility);
+      }
 
       if (where.stage && typeof where.stage === 'object') {
         filtered = filtered.filter((m) => this.matchEqualsInsensitive(m.stage, where.stage as Record<string, string>));
@@ -171,8 +174,16 @@ class PrismaServiceMock {
       return list.length;
     },
 
-    findFirst: async ({ where, select }: { where: { id: string; status: string }; select: Record<string, unknown> }) => {
-      const material = this.materials.find((m) => m.id === where.id && m.status === where.status);
+    findFirst: async ({
+      where,
+      select,
+    }: {
+      where: { id: string; status: string; visibility?: 'PUBLIC' | 'PRIVATE' };
+      select: Record<string, unknown>;
+    }) => {
+      const material = this.materials.find(
+        (m) => m.id === where.id && m.status === where.status && (!where.visibility || m.visibility === where.visibility),
+      );
       if (!material) {
         return null;
       }
@@ -219,7 +230,7 @@ class PrismaServiceMock {
     },
   };
 
-  seed(): { approvedId: string; pendingId: string } {
+  seed(): { approvedId: string; pendingId: string; approvedPrivateId: string } {
     const uploaderId = crypto.randomUUID();
     this.users.push({
       id: uploaderId,
@@ -231,6 +242,7 @@ class PrismaServiceMock {
 
     const approvedId = crypto.randomUUID();
     const pendingId = crypto.randomUUID();
+    const approvedPrivateId = crypto.randomUUID();
 
     this.materials.push(
       {
@@ -249,6 +261,23 @@ class PrismaServiceMock {
         uploaderId,
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
         updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
+      {
+        id: approvedPrivateId,
+        title: 'Math private approved',
+        description: 'keyword-linear-algebra-private',
+        stage: 'HighSchool',
+        grade: 'Grade 10',
+        subject: 'Math',
+        year: 2024,
+        region: 'CN-ZJ',
+        fileKey: 'approved-private.txt',
+        visibility: 'PRIVATE',
+        status: 'APPROVED',
+        reviewComment: 'approved',
+        uploaderId,
+        createdAt: new Date('2026-01-03T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-03T00:00:00.000Z'),
       },
       {
         id: pendingId,
@@ -279,7 +308,7 @@ class PrismaServiceMock {
       { id: crypto.randomUUID(), userId: uploaderId, materialId: approvedId },
     );
 
-    return { approvedId, pendingId };
+    return { approvedId, pendingId, approvedPrivateId };
   }
 
   private countDownloads(materialId: string): number {
@@ -341,7 +370,13 @@ async function run(): Promise<void> {
   console.log('guest detail body:', detailBody);
 
   const pendingVisible = listBody.includes(seeded.pendingId);
+  const privateApprovedVisible = listBody.includes(seeded.approvedPrivateId);
+  const privateDetailRes = await fetch(`${base}/materials/${seeded.approvedPrivateId}`);
+  const privateDetailBody = await privateDetailRes.text();
   console.log('pending in list:', pendingVisible);
+  console.log('private approved in list:', privateApprovedVisible);
+  console.log('private approved detail status:', privateDetailRes.status);
+  console.log('private approved detail body:', privateDetailBody);
 
   await app.close();
 }
