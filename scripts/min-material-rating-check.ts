@@ -49,6 +49,12 @@ type DbDownload = {
   materialId: string;
 };
 
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
 class PrismaServiceMock {
   private users: DbUser[] = [];
   private materials: DbMaterial[] = [];
@@ -350,6 +356,9 @@ async function run(): Promise<void> {
   const firstRatingBody = await firstRatingRes.text();
   console.log('first rating status:', firstRatingRes.status);
   console.log('first rating body:', firstRatingBody);
+  assert(firstRatingRes.status === 201, 'first rating should succeed');
+  const firstRatingJson = JSON.parse(firstRatingBody) as { content?: string | null };
+  assert(firstRatingJson.content === 'First review', 'first rating response should include content');
 
   const secondRatingRes = await fetch(`${base}/materials/${seeded.approvedId}/ratings`, {
     method: 'POST',
@@ -365,6 +374,9 @@ async function run(): Promise<void> {
   const secondRatingBody = await secondRatingRes.text();
   console.log('second rating status:', secondRatingRes.status);
   console.log('second rating body:', secondRatingBody);
+  assert(secondRatingRes.status === 201, 'second rating update should succeed');
+  const secondRatingJson = JSON.parse(secondRatingBody) as { content?: string | null };
+  assert(secondRatingJson.content === 'Updated review', 'updated rating response should include latest content');
 
   const pendingRatingRes = await fetch(`${base}/materials/${seeded.pendingId}/ratings`, {
     method: 'POST',
@@ -384,12 +396,19 @@ async function run(): Promise<void> {
   const ratingsListBody = await ratingsListRes.text();
   console.log('ratings list status:', ratingsListRes.status);
   console.log('ratings list body:', ratingsListBody);
+  assert(ratingsListRes.status === 200, 'ratings list should succeed');
+  const ratingsListJson = JSON.parse(ratingsListBody) as {
+    items: Array<{ content?: string | null }>;
+  };
+  assert(ratingsListJson.items[0]?.content === 'Updated review', 'ratings list should expose content field');
 
   const detailRes = await fetch(`${base}/materials/${seeded.approvedId}`);
   console.log('detail status:', detailRes.status);
   console.log('detail body:', await detailRes.text());
 
-  console.log('db ratings snapshot:', JSON.stringify(prismaMock.debugRatings(seeded.approvedId)));
+  const dbRatings = prismaMock.debugRatings(seeded.approvedId);
+  console.log('db ratings snapshot:', JSON.stringify(dbRatings));
+  assert(dbRatings[0]?.comment === 'Updated review', 'db rating comment column should persist dto.content value');
 
   await app.close();
 }

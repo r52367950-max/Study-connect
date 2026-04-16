@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils'
 
 const schema = z.object({
   score: z.number().min(1, '请选择评分').max(5),
-  comment: z.string().max(500, '评论最多 500 字').optional(),
+  content: z.string().max(500, '评论最多 500 字').optional(),
 })
 type FormValues = z.infer<typeof schema>
 
@@ -31,14 +31,14 @@ export function RatingForm({ materialId, existingScore }: RatingFormProps) {
 
   const { register, setValue, watch, handleSubmit, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { score: existingScore ?? 0, comment: '' },
+    defaultValues: { score: existingScore ?? 0, content: '' },
   })
 
   const score = watch('score')
 
   const { mutate, isPending } = useMutation({
     mutationFn: (data: FormValues) =>
-      submitRating(materialId, { score: data.score, comment: data.comment }),
+      submitRating(materialId, { score: data.score, content: data.content }),
     onSuccess: () => {
       toast({ title: '评分成功', description: '感谢您的评价！' })
       queryClient.invalidateQueries({ queryKey: ['ratings', materialId] })
@@ -87,15 +87,15 @@ export function RatingForm({ materialId, existingScore }: RatingFormProps) {
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="comment">评论（选填）</Label>
+        <Label htmlFor="content">评论（选填）</Label>
         <Textarea
-          id="comment"
+          id="content"
           placeholder="写下您的使用感受…"
           rows={3}
-          {...register('comment')}
+          {...register('content')}
         />
-        {errors.comment && (
-          <p className="text-xs text-destructive">{errors.comment.message}</p>
+        {errors.content && (
+          <p className="text-xs text-destructive">{errors.content.message}</p>
         )}
       </div>
 

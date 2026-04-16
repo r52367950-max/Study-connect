@@ -77,6 +77,10 @@ export async function submitRating(
   materialId: string,
   payload: CreateRatingPayload,
 ): Promise<Rating> {
-  const { data } = await apiClient.post<Rating>(`/materials/${materialId}/ratings`, payload)
+  const ratingPayload: CreateRatingPayload = {
+    score: payload.score,
+    content: payload.content,
+  }
+  const { data } = await apiClient.post<Rating>(`/materials/${materialId}/ratings`, ratingPayload)
   return data
 }
