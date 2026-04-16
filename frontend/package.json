@@ -9,7 +9,9 @@
     "lint": "eslint . --max-warnings=0",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:frontend:min": "vitest run src/__tests__"
+    "test:frontend:min": "vitest run src/__tests__",
+    "quality:gate": "npm run build && npm run lint && npm run test:frontend:min",
+    "quality:cold-start": "rm -rf .next node_modules/.cache && CI=true npm run lint"
   },
   "dependencies": {
     "next": "14.2.29",
