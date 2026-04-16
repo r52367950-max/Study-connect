@@ -80,9 +80,90 @@ export class MaterialsService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 10;
     const skip = (page - 1) * pageSize;
+    const sort = query.sort ?? MaterialSort.LATEST;
 
     const where = this.buildApprovedWhere(query);
-    const orderBy = this.buildOrderBy(query.sort ?? MaterialSort.LATEST, Boolean(query.q));
+    const orderBy = this.buildOrderBy(sort, Boolean(query.q));
+
+    if (sort === MaterialSort.RATING) {
+      const allItems = await this.prisma.material.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }],
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          stage: true,
+          grade: true,
+          subject: true,
+          year: true,
+          region: true,
+          visibility: true,
+          createdAt: true,
+          _count: {
+            select: {
+              downloads: true,
+            },
+          },
+        },
+      });
+
+      const materialIds = allItems.map((item) => item.id);
+      const [total, aggregates] = await Promise.all([
+        this.prisma.material.count({ where }),
+        materialIds.length
+          ? this.prisma.rating.groupBy({
+              by: ['materialId'],
+              where: { materialId: { in: materialIds } },
+              _avg: { score: true },
+              _count: { score: true },
+            })
+          : Promise.resolve([]),
+      ]);
+
+      const aggregateMap = new Map(
+        aggregates.map((row) => [row.materialId, { avgScore: row._avg.score, ratingCount: row._count.score }]),
+      );
+
+      const sortedItems = [...allItems].sort((left, right) => {
+        const leftAggregate = aggregateMap.get(left.id);
+        const rightAggregate = aggregateMap.get(right.id);
+
+        const avgDiff = (rightAggregate?.avgScore ?? -1) - (leftAggregate?.avgScore ?? -1);
+        if (avgDiff !== 0) {
+          return avgDiff;
+        }
+
+        const countDiff = (rightAggregate?.ratingCount ?? 0) - (leftAggregate?.ratingCount ?? 0);
+        if (countDiff !== 0) {
+          return countDiff;
+        }
+
+        return right.createdAt.getTime() - left.createdAt.getTime();
+      });
+
+      const pagedItems = sortedItems.slice(skip, skip + pageSize);
+
+      return {
+        page,
+        pageSize,
+        total,
+        items: pagedItems.map((item) => ({
+          id: item.id,
+          title: item.title,
+          description: item.description,
+          stage: item.stage,
+          grade: item.grade,
+          subject: item.subject,
+          year: item.year,
+          region: item.region,
+          visibility: item.visibility,
+          createdAt: item.createdAt,
+          avg_score: aggregateMap.get(item.id)?.avgScore ?? null,
+          download_count: item._count.downloads,
+        })),
+      };
+    }
 
     const [items, total] = await Promise.all([
       this.prisma.material.findMany({
@@ -377,7 +458,7 @@ export class MaterialsService {
     }
 
     if (sort === MaterialSort.RATING) {
-      return [{ ratings: { _count: 'desc' } }, { createdAt: 'desc' }];
+      return [{ createdAt: 'desc' }];
     }
 
     if (sort === MaterialSort.RELEVANCE) {

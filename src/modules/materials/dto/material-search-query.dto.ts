@@ -48,7 +48,11 @@ export class MaterialSearchQueryDto {
   @MaxLength(50)
   region?: string;
 
-  @ApiPropertyOptional({ enum: MaterialSort, default: MaterialSort.LATEST })
+  @ApiPropertyOptional({
+    enum: MaterialSort,
+    default: MaterialSort.LATEST,
+    description: 'Sort mode. `rating` means higher average score first, then rating count, then newest createdAt.',
+  })
   @IsOptional()
   @IsEnum(MaterialSort)
   sort?: MaterialSort;

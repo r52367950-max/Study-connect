@@ -43,6 +43,12 @@ type DbDownload = {
   materialId: string;
 };
 
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
 class PrismaServiceMock {
   private users: DbUser[] = [];
   private materials: DbMaterial[] = [];
@@ -105,9 +111,9 @@ class PrismaServiceMock {
       select,
     }: {
       where: Record<string, unknown>;
-      skip: number;
-      take: number;
-      orderBy: Array<Record<string, unknown>>;
+      skip?: number;
+      take?: number;
+      orderBy?: Array<Record<string, unknown>>;
       select: Record<string, unknown>;
     }) => {
       let filtered = this.materials.filter((material) => material.status === where.status);
@@ -143,7 +149,7 @@ class PrismaServiceMock {
       }
 
       const ordered = [...filtered];
-      const firstOrder = orderBy[0] ?? {};
+      const firstOrder = orderBy?.[0] ?? {};
       if ('createdAt' in firstOrder) {
         ordered.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
       } else if ('downloads' in firstOrder) {
@@ -152,7 +158,10 @@ class PrismaServiceMock {
         ordered.sort((a, b) => this.countRatings(b.id) - this.countRatings(a.id));
       }
 
-      return ordered.slice(skip, skip + take).map((material) => {
+      const safeSkip = skip ?? 0;
+      const safeTake = take ?? Number.MAX_SAFE_INTEGER;
+
+      return ordered.slice(safeSkip, safeSkip + safeTake).map((material) => {
         const out: Record<string, unknown> = {};
         for (const key of Object.keys(select)) {
           if (key === '_count') {
@@ -211,6 +220,7 @@ class PrismaServiceMock {
         return {
           materialId,
           _avg: { score: avg },
+          _count: { score: materialRatings.length },
         };
       });
     },
@@ -230,7 +240,13 @@ class PrismaServiceMock {
     },
   };
 
-  seed(): { approvedId: string; pendingId: string; approvedPrivateId: string } {
+  seed(): {
+    approvedId: string;
+    pendingId: string;
+    approvedPrivateId: string;
+    highAvgLowCountId: string;
+    lowAvgHighCountId: string;
+  } {
     const uploaderId = crypto.randomUUID();
     this.users.push({
       id: uploaderId,
@@ -243,6 +259,8 @@ class PrismaServiceMock {
     const approvedId = crypto.randomUUID();
     const pendingId = crypto.randomUUID();
     const approvedPrivateId = crypto.randomUUID();
+    const highAvgLowCountId = crypto.randomUUID();
+    const lowAvgHighCountId = crypto.randomUUID();
 
     this.materials.push(
       {
@@ -296,11 +314,52 @@ class PrismaServiceMock {
         createdAt: new Date('2026-01-02T00:00:00.000Z'),
         updatedAt: new Date('2026-01-02T00:00:00.000Z'),
       },
+      {
+        id: highAvgLowCountId,
+        title: 'High score few reviews',
+        description: 'rating-sort-high-avg',
+        stage: 'HighSchool',
+        grade: 'Grade 10',
+        subject: 'Math',
+        year: 2024,
+        region: 'CN-ZJ',
+        fileKey: 'high-avg.txt',
+        visibility: 'PUBLIC',
+        status: 'APPROVED',
+        reviewComment: 'approved',
+        uploaderId,
+        createdAt: new Date('2026-01-04T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-04T00:00:00.000Z'),
+      },
+      {
+        id: lowAvgHighCountId,
+        title: 'Low score many reviews',
+        description: 'rating-sort-low-avg',
+        stage: 'HighSchool',
+        grade: 'Grade 10',
+        subject: 'Math',
+        year: 2024,
+        region: 'CN-ZJ',
+        fileKey: 'low-avg.txt',
+        visibility: 'PUBLIC',
+        status: 'APPROVED',
+        reviewComment: 'approved',
+        uploaderId,
+        createdAt: new Date('2026-01-05T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-05T00:00:00.000Z'),
+      },
     );
 
     this.ratings.push(
       { id: crypto.randomUUID(), userId: uploaderId, materialId: approvedId, score: 4 },
       { id: crypto.randomUUID(), userId: uploaderId, materialId: approvedId, score: 5 },
+      { id: crypto.randomUUID(), userId: uploaderId, materialId: highAvgLowCountId, score: 5 },
+      { id: crypto.randomUUID(), userId: crypto.randomUUID(), materialId: highAvgLowCountId, score: 5 },
+      { id: crypto.randomUUID(), userId: uploaderId, materialId: lowAvgHighCountId, score: 1 },
+      { id: crypto.randomUUID(), userId: crypto.randomUUID(), materialId: lowAvgHighCountId, score: 1 },
+      { id: crypto.randomUUID(), userId: crypto.randomUUID(), materialId: lowAvgHighCountId, score: 2 },
+      { id: crypto.randomUUID(), userId: crypto.randomUUID(), materialId: lowAvgHighCountId, score: 2 },
+      { id: crypto.randomUUID(), userId: crypto.randomUUID(), materialId: lowAvgHighCountId, score: 2 },
     );
     this.downloads.push(
       { id: crypto.randomUUID(), userId: uploaderId, materialId: approvedId },
@@ -308,7 +367,7 @@ class PrismaServiceMock {
       { id: crypto.randomUUID(), userId: uploaderId, materialId: approvedId },
     );
 
-    return { approvedId, pendingId, approvedPrivateId };
+    return { approvedId, pendingId, approvedPrivateId, highAvgLowCountId, lowAvgHighCountId };
   }
 
   private countDownloads(materialId: string): number {
@@ -377,6 +436,20 @@ async function run(): Promise<void> {
   console.log('private approved in list:', privateApprovedVisible);
   console.log('private approved detail status:', privateDetailRes.status);
   console.log('private approved detail body:', privateDetailBody);
+
+  const sortByRatingRes = await fetch(`${base}/materials?sort=rating&page=1&pageSize=10`);
+  const sortByRatingBody = await sortByRatingRes.json();
+  const ids = (sortByRatingBody.items as Array<{ id: string }>).map((item) => item.id);
+  const highIndex = ids.indexOf(seeded.highAvgLowCountId);
+  const lowIndex = ids.indexOf(seeded.lowAvgHighCountId);
+  assert(highIndex >= 0, 'high-avg material should appear in rating sort result');
+  assert(lowIndex >= 0, 'low-avg material should appear in rating sort result');
+  assert(
+    highIndex < lowIndex,
+    'rating sort should rank higher average score before lower average score even if lower average has more ratings',
+  );
+  console.log('rating sort status:', sortByRatingRes.status);
+  console.log('rating sort ids:', ids.join(','));
 
   await app.close();
 }
