@@ -11,6 +11,7 @@ type SignedRequestOptions = {
 
 @Injectable()
 export class MinioService {
+  private static readonly DEFAULT_SIGNED_URL_TTL_SECONDS = 300;
   private readonly endpoint: string;
   private readonly port: number;
   private readonly useSSL: boolean;
@@ -18,6 +19,7 @@ export class MinioService {
   private readonly secretKey: string;
   private readonly bucket: string;
   private readonly region: string;
+  private readonly signedUrlTtlSeconds: number;
 
   constructor(private readonly configService: ConfigService) {
     this.endpoint = this.configService.get<string>('MINIO_ENDPOINT') ?? 'localhost';
@@ -27,6 +29,9 @@ export class MinioService {
     this.secretKey = this.configService.get<string>('MINIO_SECRET_KEY') ?? '';
     this.bucket = this.configService.get<string>('MINIO_BUCKET') ?? 'study-connect';
     this.region = this.configService.get<string>('MINIO_REGION') ?? 'us-east-1';
+    this.signedUrlTtlSeconds = this.parseSignedUrlTtlSeconds(
+      this.configService.get<string>('MINIO_SIGNED_URL_TTL_SECONDS'),
+    );
   }
 
   async uploadObject(key: string, payload: Buffer, contentType: string): Promise<string> {
@@ -44,6 +49,53 @@ export class MinioService {
 
   getObjectUrl(key: string): string {
     return `${this.baseUrl()}/${this.bucket}/${this.encodePath(key)}`;
+  }
+
+  getSignedDownloadUrl(key: string, ttlSeconds: number = this.signedUrlTtlSeconds): string {
+    if (!this.accessKey || !this.secretKey) {
+      throw new InternalServerErrorException('MinIO credentials are not configured');
+    }
+
+    const safeTtlSeconds = this.parseSignedUrlTtlSeconds(String(ttlSeconds));
+    const canonicalUri = `/${this.bucket}/${this.encodePath(key)}`;
+    const host = `${this.endpoint}:${this.port}`;
+    const amzDate = this.getAmzDate();
+    const dateStamp = amzDate.slice(0, 8);
+    const credentialScope = `${dateStamp}/${this.region}/s3/aws4_request`;
+    const signedHeaders = 'host';
+
+    const queryParams = [
+      ['X-Amz-Algorithm', 'AWS4-HMAC-SHA256'],
+      ['X-Amz-Credential', `${this.accessKey}/${credentialScope}`],
+      ['X-Amz-Date', amzDate],
+      ['X-Amz-Expires', String(safeTtlSeconds)],
+      ['X-Amz-SignedHeaders', signedHeaders],
+    ] as const;
+
+    const canonicalQueryString = queryParams
+      .map(([queryKey, queryValue]) => `${this.encodeQuery(queryKey)}=${this.encodeQuery(queryValue)}`)
+      .join('&');
+
+    const canonicalRequest = [
+      'GET',
+      canonicalUri,
+      canonicalQueryString,
+      `host:${host}\n`,
+      signedHeaders,
+      'UNSIGNED-PAYLOAD',
+    ].join('\n');
+
+    const stringToSign = [
+      'AWS4-HMAC-SHA256',
+      amzDate,
+      credentialScope,
+      this.sha256Hex(canonicalRequest),
+    ].join('\n');
+
+    const signingKey = this.getSigningKey(dateStamp);
+    const signature = createHmac('sha256', signingKey).update(stringToSign).digest('hex');
+
+    return `${this.baseUrl()}${canonicalUri}?${canonicalQueryString}&X-Amz-Signature=${signature}`;
   }
 
   private async ensureBucket(): Promise<void> {
@@ -128,6 +180,20 @@ export class MinioService {
       .split('/')
       .map((segment) => encodeURIComponent(segment))
       .join('/');
+  }
+
+  private encodeQuery(value: string): string {
+    return encodeURIComponent(value);
+  }
+
+  private parseSignedUrlTtlSeconds(raw: string | undefined): number {
+    const parsed = Number(raw ?? MinioService.DEFAULT_SIGNED_URL_TTL_SECONDS);
+
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return MinioService.DEFAULT_SIGNED_URL_TTL_SECONDS;
+    }
+
+    return Math.floor(parsed);
   }
 
   private sha256Hex(input: string | Buffer): string {

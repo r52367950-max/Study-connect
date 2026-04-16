@@ -40,6 +40,12 @@ type DbDownload = {
   downloadedAt: Date;
 };
 
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
 class PrismaServiceMock {
   private users: DbUser[] = [];
   private materials: DbMaterial[] = [];
@@ -203,8 +209,8 @@ class PrismaServiceMock {
 }
 
 class MinioServiceMock {
-  getObjectUrl(key: string): string {
-    return `http://minio.local/study-connect/${key}`;
+  getSignedDownloadUrl(key: string): string {
+    return `http://minio.local/study-connect/${key}?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=mock`;
   }
 
   async uploadObject(): Promise<string> {
@@ -249,8 +255,7 @@ async function run(): Promise<void> {
   const seeded = prismaMock.seedMaterials(registered.id);
 
   const guestDownload = await fetch(`${base}/materials/${seeded.approvedId}/download`);
-  console.log('guest download status:', guestDownload.status);
-  console.log('guest download body:', await guestDownload.text());
+  assert(guestDownload.status === 401, `guest download should be 401, got ${guestDownload.status}`);
 
   const loginRes = await fetch(`${base}/auth/login`, {
     method: 'POST',
@@ -262,22 +267,33 @@ async function run(): Promise<void> {
   const approvedRes = await fetch(`${base}/materials/${seeded.approvedId}/download`, {
     headers: { authorization: `Bearer ${loginBody.accessToken}` },
   });
-  console.log('approved download status:', approvedRes.status);
-  console.log('approved download body:', await approvedRes.text());
+  assert(approvedRes.status === 200, `approved material download should be 200, got ${approvedRes.status}`);
+  const approvedBody = (await approvedRes.json()) as { downloadUrl: string; materialId: string };
+  assert(
+    approvedBody.downloadUrl.includes('X-Amz-Algorithm=AWS4-HMAC-SHA256'),
+    'approved material should return signed download URL',
+  );
+  assert(approvedBody.materialId === seeded.approvedId, 'approved response should keep material id');
 
   const pendingRes = await fetch(`${base}/materials/${seeded.pendingId}/download`, {
     headers: { authorization: `Bearer ${loginBody.accessToken}` },
   });
-  console.log('pending download status:', pendingRes.status);
-  console.log('pending download body:', await pendingRes.text());
+  assert(pendingRes.status === 404, `pending material download should be 404, got ${pendingRes.status}`);
 
   const privateApprovedRes = await fetch(`${base}/materials/${seeded.privateApprovedId}/download`, {
     headers: { authorization: `Bearer ${loginBody.accessToken}` },
   });
-  console.log('private approved download status:', privateApprovedRes.status);
-  console.log('private approved download body:', await privateApprovedRes.text());
+  assert(
+    privateApprovedRes.status === 404,
+    `private approved material download should be 404, got ${privateApprovedRes.status}`,
+  );
 
-  console.log('db downloads snapshot:', JSON.stringify(prismaMock.debugDownloads()));
+  const downloads = prismaMock.debugDownloads();
+  assert(downloads.length === 1, `downloads should only contain one successful record, got ${downloads.length}`);
+  assert(
+    downloads[0]?.materialId === seeded.approvedId,
+    'download record should be created only for approved public material',
+  );
 
   await app.close();
 }
