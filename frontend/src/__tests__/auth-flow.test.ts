@@ -27,17 +27,19 @@ describe('auth flow regression', () => {
     vi.spyOn(apiClient, 'post').mockResolvedValueOnce({
       data: {
         user: mockUser,
+        accessToken: 'jwt-token',
       },
     } as never)
 
     const data = await login({ email: mockUser.email, password: 'password123' })
-    useAuthStore.getState().setAuth(data.user)
+    useAuthStore.getState().setAuth(data.user, data.accessToken)
 
     expect(useAuthStore.getState().user).toEqual(mockUser)
+    expect(useAuthStore.getState().accessToken).toBe('jwt-token')
   })
 
-  it('uses credentialed request for /auth/me without Authorization header', async () => {
-    useAuthStore.getState().setAuth(mockUser)
+  it('uses credentialed request for /auth/me with bearer Authorization header', async () => {
+    useAuthStore.getState().setAuth(mockUser, 'jwt-token')
 
     const adapter = vi.fn(async (config) => ({
       data: mockUser,
@@ -58,6 +60,6 @@ describe('auth flow regression', () => {
 
     expect(requestConfig.url).toBe('/auth/me')
     expect(requestConfig.withCredentials).toBe(true)
-    expect(authHeader).toBeUndefined()
+    expect(authHeader).toBe('Bearer jwt-token')
   })
 })

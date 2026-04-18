@@ -1,14 +1,14 @@
 import { Module } from '@nestjs/common';
-import { CsrfService } from '../../common/security/csrf.service';
 import { RateLimitModule } from '../../common/rate-limit.module';
+import { SecurityModule } from '../../common/security/security.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { RolesGuard } from './guards/roles.guard';
 
 @Module({
-  imports: [RateLimitModule],
+  imports: [RateLimitModule, SecurityModule],
   controllers: [AuthController],
-  providers: [AuthService, RolesGuard, CsrfService],
-  exports: [AuthService, CsrfService],
+  providers: [AuthService, RolesGuard],
+  exports: [AuthService],
 })
 export class AuthModule {}

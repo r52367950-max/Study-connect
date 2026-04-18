@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { RateLimitGuard } from './common/rate-limit.guard';
 import { RateLimitModule } from './common/rate-limit.module';
 import { CsrfGuard } from './common/security/csrf.guard';
+import { SecurityModule } from './common/security/security.module';
 import { PrismaModule } from './infra';
 import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -30,6 +31,7 @@ const appGuardProviders: Provider[] = APP_GUARD_CHAIN.map((guardClass: Type<unkn
     }),
     PrismaModule,
     RateLimitModule,
+    SecurityModule,
     AuthModule,
     UsersModule,
     MaterialsModule,

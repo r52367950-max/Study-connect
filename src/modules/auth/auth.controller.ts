@@ -60,7 +60,7 @@ export class AuthController {
   ): Promise<AuthResponseDto> {
     const authResult = await this.authService.register(dto);
     this.setAuthCookies(response, authResult.accessToken, authResult.refreshToken);
-    return { user: authResult.user };
+    return { user: authResult.user, accessToken: authResult.accessToken };
   }
 
   @Public()
@@ -79,7 +79,7 @@ export class AuthController {
   ): Promise<AuthResponseDto> {
     const authResult = await this.authService.login(dto, req.ip);
     this.setAuthCookies(response, authResult.accessToken, authResult.refreshToken);
-    return { user: authResult.user };
+    return { user: authResult.user, accessToken: authResult.accessToken };
   }
 
   @Public()
@@ -89,17 +89,18 @@ export class AuthController {
     schema: {
       properties: {
         success: { type: 'boolean', example: true },
+        accessToken: { type: 'string' },
       },
     },
   })
   async refresh(
     @Req() req: Request,
     @Res({ passthrough: true }) response: Response,
-  ): Promise<{ success: true }> {
+  ): Promise<{ success: true; accessToken: string }> {
     const refreshToken = this.extractCookieToken(req, 'refresh-token');
     const authResult = await this.authService.refreshAccessToken(refreshToken);
     this.setAuthCookies(response, authResult.accessToken, authResult.refreshToken);
-    return { success: true };
+    return { success: true, accessToken: authResult.accessToken };
   }
 
   @Public()

@@ -41,7 +41,7 @@ export default function RegisterPage() {
   const { mutate, isPending } = useMutation({
     mutationFn: registerApi,
     onSuccess: (data) => {
-      setAuth(data.user)
+      setAuth(data.user, data.accessToken)
       router.replace('/materials')
     },
     onError: (err) => {

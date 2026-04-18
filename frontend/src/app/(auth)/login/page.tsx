@@ -46,7 +46,7 @@ function LoginPageContent() {
   const { mutate, isPending } = useMutation({
     mutationFn: login,
     onSuccess: (data) => {
-      setAuth(data.user)
+      setAuth(data.user, data.accessToken)
       router.replace(redirect)
     },
     onError: (err) => {
