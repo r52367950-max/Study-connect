@@ -135,6 +135,13 @@ async function run(): Promise<void> {
     },
   });
 
+  const publicReadRes = await fetch(`${base}/materials`, {
+    method: 'GET',
+    headers: {
+      origin: evilOrigin,
+    },
+  });
+
   assertStatus(missingTokenRes.status, 403, 'missing-token');
   assertStatus(mismatchTokenRes.status, 403, 'token-mismatch');
   assertStatus(crossSiteRes.status, 403, 'cross-site-origin');
@@ -143,6 +150,7 @@ async function run(): Promise<void> {
   assertStatus(crossSiteRatingRes.status, 403, 'cross-site-rating');
   assertStatus(crossSiteAdminRes.status, 403, 'cross-site-admin');
   assertStatus(preflightRes.status, 204, 'preflight');
+  assertStatus(publicReadRes.status, 200, 'public-read-allowed');
 
   console.log('csrf regression checks passed');
   await app.close();
