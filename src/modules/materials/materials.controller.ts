@@ -70,6 +70,11 @@ export class MaterialsController {
   }
 
   @Post(':id/ratings')
+  @RateLimit({
+    name: 'materials-rating-write',
+    limit: 20,
+    windowMs: 60_000,
+  })
   @ApiOperation({ summary: 'Create or update one rating for one approved material (login required)' })
   @ApiParam({ name: 'id', type: String })
   rateMaterial(@Param('id') id: string, @Req() req: Request, @Body() dto: CreateRatingDto) {
@@ -77,6 +82,11 @@ export class MaterialsController {
   }
 
   @Get(':id/download')
+  @RateLimit({
+    name: 'materials-download',
+    limit: 90,
+    windowMs: 60_000,
+  })
   @ApiOperation({ summary: 'Download one approved public material (login required; APPROVED + PUBLIC)' })
   @ApiParam({ name: 'id', type: String })
   download(@Param('id') id: string, @Req() req: Request) {
