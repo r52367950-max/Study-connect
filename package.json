@@ -17,6 +17,7 @@
     "test:min-material-download": "ts-node scripts/min-material-download-check.ts",
     "test:min-material-rating": "ts-node scripts/min-material-rating-check.ts",
     "test:min-csrf-regression": "ts-node scripts/min-csrf-regression-check.ts",
+    "test:min-rate-limit": "TS_NODE_TRANSPILE_ONLY=1 ts-node scripts/min-rate-limit-check.ts",
     "check:prisma": "DATABASE_URL=\"postgresql://postgres:postgres@localhost:5432/study_connect?schema=public\" prisma validate",
     "check:quality": "npm run lint && npm run build && npm run check:prisma",
     "test:min-all": "node scripts/min-all-runner.cjs",

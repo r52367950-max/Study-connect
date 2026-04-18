@@ -8,6 +8,7 @@ import {
 import { UserRole } from '@prisma/client';
 import { Request, Response } from 'express';
 import { CsrfService } from '../../common/security/csrf.service';
+import { RateLimit } from '../../common/rate-limit.decorator';
 import { Public } from './decorators/public.decorator';
 import { Roles } from './decorators/roles.decorator';
 import { AuthResponseDto, AuthUserDto } from './dto/auth-response.dto';
@@ -26,6 +27,11 @@ export class AuthController {
 
   @Public()
   @Get('csrf')
+  @RateLimit({
+    name: 'auth-csrf',
+    limit: 90,
+    windowMs: 60_000,
+  })
   @ApiOperation({ summary: 'Issue CSRF token cookie for state-changing requests' })
   @ApiOkResponse({
     schema: {
@@ -40,6 +46,11 @@ export class AuthController {
 
   @Public()
   @Post('register')
+  @RateLimit({
+    name: 'auth-register',
+    limit: 12,
+    windowMs: 60_000,
+  })
   @ApiOperation({ summary: 'Register a new user account' })
   @ApiOkResponse({ type: AuthResponseDto })
   async register(
@@ -53,6 +64,11 @@ export class AuthController {
 
   @Public()
   @Post('login')
+  @RateLimit({
+    name: 'auth-login-ip',
+    limit: 25,
+    windowMs: 60_000,
+  })
   @ApiOperation({ summary: 'Login and set JWT access token in HttpOnly cookie' })
   @ApiOkResponse({ type: AuthResponseDto })
   async login(
@@ -67,6 +83,11 @@ export class AuthController {
 
   @Public()
   @Post('logout')
+  @RateLimit({
+    name: 'auth-logout',
+    limit: 40,
+    windowMs: 60_000,
+  })
   @ApiOperation({ summary: 'Clear JWT auth cookie' })
   @ApiOkResponse({
     schema: {

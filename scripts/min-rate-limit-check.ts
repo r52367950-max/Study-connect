@@ -2,32 +2,55 @@
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { AppModule } from '../src/app.module';
-import { PrismaService } from '../src/infra';
+import { MinioService, PrismaService } from '../src/infra';
+
+type UserRole = 'USER' | 'ADMIN';
+type MaterialStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'OFFLINE';
 
 type DbUser = {
   id: string;
   email: string;
   username: string;
   passwordHash: string;
-  role: 'USER' | 'ADMIN';
+  role: UserRole;
+};
+
+type DbMaterial = {
+  id: string;
+  title: string;
+  description: string | null;
+  stage: string | null;
+  grade: string | null;
+  subject: string | null;
+  year: number | null;
+  region: string | null;
+  fileKey: string;
+  visibility: 'PUBLIC' | 'PRIVATE';
+  status: MaterialStatus;
+  reviewComment: string | null;
+  uploaderId: string;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 class PrismaServiceMock {
   private users: DbUser[] = [];
+  private materials: DbMaterial[] = [];
 
   user = {
     findFirst: async ({ where }: { where: { OR: Array<{ email?: string; username?: string }> } }) => {
-      const found = this.users.find((user) =>
-        where.OR.some((cond) => cond.email === user.email || cond.username === user.username),
+      return (
+        this.users.find((user) =>
+          where.OR.some((cond) => cond.email === user.email || cond.username === user.username),
+        ) ?? null
       );
-      return found ?? null;
     },
 
     create: async ({
       data,
       select,
     }: {
-      data: { email: string; username: string; passwordHash: string; role: 'USER' | 'ADMIN' };
+      data: { email: string; username: string; passwordHash: string; role: UserRole };
       select: { id?: boolean; email?: boolean; username?: boolean; role?: boolean };
     }) => {
       const user: DbUser = {
@@ -52,101 +75,342 @@ class PrismaServiceMock {
     },
   };
 
-  setUserRole(email: string, role: 'USER' | 'ADMIN') {
+  material = {
+    create: async ({
+      data,
+      select,
+    }: {
+      data: {
+        title: string;
+        description?: string;
+        stage?: string;
+        grade?: string;
+        subject?: string;
+        year?: number;
+        region?: string;
+        fileKey: string;
+        visibility: 'PUBLIC' | 'PRIVATE';
+        status: MaterialStatus;
+        reviewComment?: string;
+        uploaderId: string;
+      };
+      select: Record<string, boolean>;
+    }) => {
+      const now = new Date();
+      const material: DbMaterial = {
+        id: crypto.randomUUID(),
+        title: data.title,
+        description: data.description ?? null,
+        stage: data.stage ?? null,
+        grade: data.grade ?? null,
+        subject: data.subject ?? null,
+        year: data.year ?? null,
+        region: data.region ?? null,
+        fileKey: data.fileKey,
+        visibility: data.visibility,
+        status: data.status,
+        reviewComment: data.reviewComment ?? null,
+        uploaderId: data.uploaderId,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.materials.push(material);
+      return this.pick(material, select);
+    },
+
+    findMany: async ({
+      where,
+      orderBy,
+      skip,
+      take,
+      select,
+    }: {
+      where: { status: MaterialStatus };
+      orderBy: { createdAt: 'desc' | 'asc' };
+      skip: number;
+      take: number;
+      select: Record<string, boolean>;
+    }) => {
+      const filtered = this.materials.filter((material) => material.status === where.status);
+      const ordered = [...filtered].sort((a, b) =>
+        orderBy.createdAt === 'desc'
+          ? b.createdAt.getTime() - a.createdAt.getTime()
+          : a.createdAt.getTime() - b.createdAt.getTime(),
+      );
+      return ordered.slice(skip, skip + take).map((material) => this.pick(material, select));
+    },
+
+    count: async ({ where }: { where: { status: MaterialStatus } }) => {
+      return this.materials.filter((material) => material.status === where.status).length;
+    },
+
+    findFirst: async ({ where, select }: { where: { id: string; status: MaterialStatus; visibility: 'PUBLIC' | 'PRIVATE' }; select: Record<string, boolean> }) => {
+      const found = this.materials.find(
+        (material) =>
+          material.id === where.id && material.status === where.status && material.visibility === where.visibility,
+      );
+      if (!found) {
+        return null;
+      }
+      return this.pick(found, select);
+    },
+  };
+
+  setUserRole(email: string, role: UserRole): void {
     const user = this.users.find((item) => item.email === email);
     if (user) {
       user.role = role;
     }
   }
 
-  material = {
-    findMany: async () => [],
-    count: async () => 0,
-  };
+  seedApprovedMaterial(input: { uploaderEmail: string; title: string; visibility: 'PUBLIC' | 'PRIVATE' }): string {
+    const uploader = this.users.find((item) => item.email === input.uploaderEmail);
+    if (!uploader) {
+      throw new Error('uploader user not found');
+    }
+
+    const now = new Date();
+    const material: DbMaterial = {
+      id: crypto.randomUUID(),
+      title: input.title,
+      description: 'seed material',
+      stage: null,
+      grade: null,
+      subject: null,
+      year: null,
+      region: null,
+      fileKey: `${crypto.randomUUID()}.txt`,
+      visibility: input.visibility,
+      status: 'APPROVED',
+      reviewComment: 'approved',
+      uploaderId: uploader.id,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.materials.push(material);
+    return material.id;
+  }
+
+  private pick(material: DbMaterial, select: Record<string, boolean>) {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(select)) {
+      if (select[key]) {
+        out[key] = (material as Record<string, unknown>)[key];
+      }
+    }
+    return out;
+  }
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+class MinioServiceMock {
+  private readonly objects = new Map<string, Buffer>();
+
+  async uploadObject(key: string, payload: Buffer): Promise<string> {
+    this.objects.set(key, payload);
+    return `study-connect/${key}`;
+  }
+
+  async getPresignedDownloadUrl(key: string): Promise<string> {
+    return `https://minio.local/${key}`;
+  }
+}
+
+function readCookiePair(setCookieHeader: string | null, cookieName: string): string {
+  if (!setCookieHeader) {
+    return '';
+  }
+
+  const segment = setCookieHeader
+    .split(',')
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(`${cookieName}=`));
+
+  if (!segment) {
+    return '';
+  }
+
+  return segment.split(';')[0] ?? '';
+}
 
 async function run(): Promise<void> {
-  process.env.JWT_SECRET = 'test-secret';
-  process.env.RATE_LIMIT_GLOBAL_LIMIT = '1000';
+  process.env.JWT_SECRET = 'rate-limit-test-secret';
+  process.env.CORS_ORIGIN = 'http://frontend.local:3000';
+
+  process.env.RATE_LIMIT_GLOBAL_LIMIT = '999';
   process.env.RATE_LIMIT_LOGIN_LIMIT = '100';
+  process.env.RATE_LIMIT_LOGIN_WINDOW_MS = '60000';
   process.env.RATE_LIMIT_LOGIN_MAX_FAILURES = '3';
-  process.env.RATE_LIMIT_LOGIN_FAILURE_WINDOW_MS = '1000';
-  process.env.RATE_LIMIT_LOGIN_LOCK_MS = '1200';
+  process.env.RATE_LIMIT_LOGIN_FAILURE_WINDOW_MS = '1200';
+  process.env.RATE_LIMIT_LOGIN_LOCK_MS = '1500';
+
+  process.env.MAX_UPLOAD_SIZE_MB = '50';
 
   const prismaMock = new PrismaServiceMock();
+  const minioMock = new MinioServiceMock();
 
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
   })
     .overrideProvider(PrismaService)
     .useValue(prismaMock)
+    .overrideProvider(MinioService)
+    .useValue(minioMock)
     .compile();
 
   const app = moduleRef.createNestApplication();
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      transform: true,
-      forbidNonWhitelisted: true,
-    }),
-  );
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }));
 
   await app.init();
   await app.listen(0);
 
-  const server = app.getHttpServer();
-  const address = server.address();
+  const address = app.getHttpServer().address();
   const port = typeof address === 'string' ? 3000 : address.port;
   const base = `http://127.0.0.1:${port}`;
 
-  await fetch(`${base}/auth/register`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      email: 'admin@example.com',
-      username: 'admin',
-      password: 'StrongPass123!',
-    }),
-  });
+  async function issueCsrfCookie(existingCookies = ''): Promise<{ token: string; cookiePair: string }> {
+    const csrfRes = await fetch(`${base}/auth/csrf`, {
+      headers: {
+        origin: 'http://frontend.local:3000',
+        ...(existingCookies ? { cookie: existingCookies } : {}),
+      },
+    });
+    const body = (await csrfRes.json()) as { csrfToken: string };
+    return {
+      token: body.csrfToken,
+      cookiePair: readCookiePair(csrfRes.headers.get('set-cookie'), 'csrf-token'),
+    };
+  }
+
+  async function registerUser(input: { email: string; username: string; password: string }): Promise<void> {
+    const csrf = await issueCsrfCookie();
+    const res = await fetch(`${base}/auth/register`, {
+      method: 'POST',
+      headers: {
+        origin: 'http://frontend.local:3000',
+        'content-type': 'application/json',
+        cookie: csrf.cookiePair,
+        'x-csrf-token': csrf.token,
+      },
+      body: JSON.stringify(input),
+    });
+
+    if (res.status !== 201) {
+      throw new Error(`register ${input.email} failed, status=${res.status}, body=${await res.text()}`);
+    }
+  }
+
+  await registerUser({ email: 'admin@example.com', username: 'admin', password: 'StrongPass123!' });
+  await registerUser({ email: 'uploader@example.com', username: 'uploader', password: 'StrongPass123!' });
 
   prismaMock.setUserRole('admin@example.com', 'ADMIN');
 
-  let lockTriggeredStatus = 0;
+  let login429 = 0;
   for (let i = 0; i < 4; i += 1) {
+    const csrf = await issueCsrfCookie();
     const res = await fetch(`${base}/auth/login`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email: 'admin@example.com', password: 'wrong-pass' }),
+      headers: {
+        origin: 'http://frontend.local:3000',
+        'content-type': 'application/json',
+        cookie: csrf.cookiePair,
+        'x-csrf-token': csrf.token,
+      },
+      body: JSON.stringify({ email: 'admin@example.com', password: 'wrong-password' }),
     });
-    lockTriggeredStatus = res.status;
-  }
-
-  await sleep(1300);
-
-  const loginAdminRes = await fetch(`${base}/auth/login`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: 'admin@example.com', password: 'StrongPass123!' }),
-  });
-
-  const adminCookie = loginAdminRes.headers.get('set-cookie') ?? '';
-
-  let adminRateLimitedStatus = 0;
-  for (let i = 0; i < 35; i += 1) {
-    const res = await fetch(`${base}/admin/materials/pending?page=1&pageSize=10`, {
-      headers: { cookie: adminCookie },
-    });
-    adminRateLimitedStatus = res.status;
     if (res.status === 429) {
+      login429 = res.status;
       break;
     }
   }
 
-  console.log('login lock status (expected 429):', lockTriggeredStatus);
-  console.log('login status after cooldown (expected 200):', loginAdminRes.status);
-  console.log('admin burst limited status (expected 429):', adminRateLimitedStatus);
+  if (login429 !== 429) {
+    throw new Error(`login rate limit check failed, expected 429 got ${login429 || 'not-hit'}`);
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 1600));
+
+  const uploadLoginCsrf = await issueCsrfCookie();
+  const uploaderLoginRes = await fetch(`${base}/auth/login`, {
+    method: 'POST',
+    headers: {
+      origin: 'http://frontend.local:3000',
+      'content-type': 'application/json',
+      cookie: uploadLoginCsrf.cookiePair,
+      'x-csrf-token': uploadLoginCsrf.token,
+    },
+    body: JSON.stringify({ email: 'uploader@example.com', password: 'StrongPass123!' }),
+  });
+  if (uploaderLoginRes.status !== 201) {
+    throw new Error(`uploader login failed, status=${uploaderLoginRes.status}, body=${await uploaderLoginRes.text()}`);
+  }
+  const authCookie = readCookiePair(uploaderLoginRes.headers.get('set-cookie'), 'auth-token');
+
+  let upload429 = 0;
+  for (let i = 0; i < 12; i += 1) {
+    const csrf = await issueCsrfCookie(authCookie);
+    const form = new FormData();
+    form.set('title', `Upload-${i}`);
+    form.set('visibility', 'PUBLIC');
+    form.set('file', new Blob([`hello-${i}`], { type: 'text/plain' }), `demo-${i}.txt`);
+
+    const res = await fetch(`${base}/materials`, {
+      method: 'POST',
+      headers: {
+        origin: 'http://frontend.local:3000',
+        cookie: `${authCookie}; ${csrf.cookiePair}`,
+        'x-csrf-token': csrf.token,
+      },
+      body: form,
+    });
+
+    if (res.status === 429) {
+      upload429 = res.status;
+      break;
+    }
+  }
+
+  if (upload429 !== 429) {
+    throw new Error(`upload rate limit check failed, expected 429 got ${upload429 || 'not-hit'}`);
+  }
+
+  const adminLoginCsrf = await issueCsrfCookie();
+  const adminLoginRes = await fetch(`${base}/auth/login`, {
+    method: 'POST',
+    headers: {
+      origin: 'http://frontend.local:3000',
+      'content-type': 'application/json',
+      cookie: adminLoginCsrf.cookiePair,
+      'x-csrf-token': adminLoginCsrf.token,
+    },
+    body: JSON.stringify({ email: 'admin@example.com', password: 'StrongPass123!' }),
+  });
+
+  if (adminLoginRes.status !== 201) {
+    throw new Error(`admin login failed, status=${adminLoginRes.status}, body=${await adminLoginRes.text()}`);
+  }
+
+  const adminCookie = readCookiePair(adminLoginRes.headers.get('set-cookie'), 'auth-token');
+
+  let admin429 = 0;
+  for (let i = 0; i < 35; i += 1) {
+    const res = await fetch(`${base}/admin/materials/pending?page=1&pageSize=10`, {
+      headers: { cookie: adminCookie },
+    });
+
+    if (res.status === 429) {
+      admin429 = res.status;
+      break;
+    }
+  }
+
+  if (admin429 !== 429) {
+    throw new Error(`admin rate limit check failed, expected 429 got ${admin429 || 'not-hit'}`);
+  }
+
+  console.log('login 429 check passed:', login429);
+  console.log('upload 429 check passed:', upload429);
+  console.log('admin 429 check passed:', admin429);
 
   await app.close();
 }
