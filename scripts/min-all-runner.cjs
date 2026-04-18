@@ -8,6 +8,7 @@ const checks = [
   'test:min-material-search',
   'test:min-material-download',
   'test:min-material-rating',
+  'test:min-csrf-regression',
 ];
 
 const results = [];

@@ -8,6 +8,7 @@ import {
 import { UserRole } from '@prisma/client';
 import { Request } from 'express';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { RateLimit } from '../../common/rate-limit.decorator';
 import { OfflineMaterialDto } from './dto/offline-material.dto';
 import { PendingMaterialsQueryDto } from './dto/pending-materials-query.dto';
 import { RejectMaterialDto } from './dto/reject-material.dto';
@@ -16,6 +17,11 @@ import { AdminService } from './admin.service';
 @ApiTags('admin')
 @ApiBearerAuth()
 @Roles(UserRole.ADMIN)
+@RateLimit({
+  name: 'admin-strict',
+  limit: 30,
+  windowMs: 60_000,
+})
 @Controller('admin')
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}

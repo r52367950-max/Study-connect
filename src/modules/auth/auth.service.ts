@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  HttpException,
+  HttpStatus,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -7,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { User, UserRole } from '@prisma/client';
 import { randomBytes, scryptSync, timingSafeEqual, createHmac } from 'crypto';
 import { PrismaService } from '../../infra';
+import { RateLimitService } from '../../common/rate-limit.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 
@@ -25,6 +28,7 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly rateLimitService: RateLimitService,
   ) {}
 
   async register(dto: RegisterDto): Promise<{ accessToken: string; user: AuthUser }> {
@@ -61,14 +65,32 @@ export class AuthService {
     };
   }
 
-  async login(dto: LoginDto): Promise<{ accessToken: string; user: AuthUser }> {
+  async login(dto: LoginDto, ipAddress = 'unknown'): Promise<{ accessToken: string; user: AuthUser }> {
+    const email = dto.email.toLowerCase();
+    const lock = this.rateLimitService.checkLoginLock(`login-email:${email}`);
+    if (lock.locked) {
+      throw new HttpException(
+        `Too many login failures, retry in ${Math.ceil(lock.retryAfterMs / 1000)}s`,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
 
     if (!user || !this.verifyPassword(dto.password, user.passwordHash)) {
+      this.rateLimitService.recordLoginFailure({
+        email,
+        ip: ipAddress,
+        failureWindowMs: this.getNumber('RATE_LIMIT_LOGIN_FAILURE_WINDOW_MS', 60_000),
+        maxFailures: this.getNumber('RATE_LIMIT_LOGIN_MAX_FAILURES', 5),
+        lockMs: this.getNumber('RATE_LIMIT_LOGIN_LOCK_MS', 5 * 60_000),
+      });
       throw new UnauthorizedException('Invalid credentials');
     }
+
+    this.rateLimitService.recordLoginSuccess(email, ipAddress);
 
     const profile: AuthUser = {
       id: user.id,
@@ -140,27 +162,31 @@ export class AuthService {
   }
 
   private parseAndVerifyToken(token: string): AccessPayload {
-    const parts = token.split('.');
-    if (parts.length !== 3) {
+    try {
+      const parts = token.split('.');
+      if (parts.length !== 3) {
+        throw new Error('Invalid token format');
+      }
+
+      const [encodedHeader, encodedPayload, signature] = parts;
+      const unsigned = `${encodedHeader}.${encodedPayload}`;
+      const expectedSignature = this.sign(unsigned);
+
+      if (!this.safeEqualText(signature, expectedSignature)) {
+        throw new Error('Invalid token signature');
+      }
+
+      const payloadText = this.base64UrlDecode(encodedPayload);
+      const payload = JSON.parse(payloadText) as Partial<AccessPayload>;
+
+      if (!payload.sub || !payload.email || !payload.username || !payload.role || !payload.exp) {
+        throw new Error('Malformed token payload');
+      }
+
+      return payload as AccessPayload;
+    } catch {
       throw new UnauthorizedException('Invalid token');
     }
-
-    const [encodedHeader, encodedPayload, signature] = parts;
-    const unsigned = `${encodedHeader}.${encodedPayload}`;
-    const expectedSignature = this.sign(unsigned);
-
-    if (!this.safeEqualText(signature, expectedSignature)) {
-      throw new UnauthorizedException('Invalid token signature');
-    }
-
-    const payloadText = this.base64UrlDecode(encodedPayload);
-    const payload = JSON.parse(payloadText) as Partial<AccessPayload>;
-
-    if (!payload.sub || !payload.email || !payload.username || !payload.role || !payload.exp) {
-      throw new UnauthorizedException('Malformed token payload');
-    }
-
-    return payload as AccessPayload;
   }
 
   private sign(input: string): string {
@@ -201,5 +227,11 @@ export class AuthService {
     }
 
     return secret;
+  }
+
+  private getNumber(key: string, fallback: number): number {
+    const raw = this.configService.get<string>(key);
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
   }
 }
