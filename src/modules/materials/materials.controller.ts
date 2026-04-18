@@ -24,6 +24,7 @@ import {
 } from '@nestjs/swagger';
 import { Request } from 'express';
 import { Public } from '../auth/decorators/public.decorator';
+import { RateLimit } from '../../common/rate-limit.decorator';
 import { CreateMaterialDto } from './dto/create-material.dto';
 import { CreateRatingDto } from './dto/create-rating.dto';
 import { MaterialRatingsQueryDto } from './dto/material-ratings-query.dto';
@@ -109,6 +110,11 @@ export class MaterialsController {
   }
 
   @Post()
+  @RateLimit({
+    name: 'materials-upload',
+    limit: 10,
+    windowMs: 60_000,
+  })
   @ApiOperation({ summary: 'Upload material file to MinIO and create pending material record' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({

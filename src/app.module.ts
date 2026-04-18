@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
-import { CsrfGuard } from './common/security/csrf.guard';
+import { RateLimitGuard } from './common/rate-limit.guard';
+import { RateLimitModule } from './common/rate-limit.module';
 import { PrismaModule } from './infra';
 import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -20,6 +21,7 @@ import { UsersModule } from './modules/users/users.module';
       envFilePath: ['.env.local', '.env'],
     }),
     PrismaModule,
+    RateLimitModule,
     AuthModule,
     UsersModule,
     MaterialsModule,
@@ -31,7 +33,7 @@ import { UsersModule } from './modules/users/users.module';
   providers: [
     {
       provide: APP_GUARD,
-      useClass: CsrfGuard,
+      useClass: RateLimitGuard,
     },
     {
       provide: APP_GUARD,

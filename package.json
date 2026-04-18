@@ -22,7 +22,7 @@
     "test:min-all": "node scripts/min-all-runner.cjs",
     "test:min-admin-update-review-errors": "ts-node scripts/min-admin-update-material-review-error-check.ts",
     "test:min-material-upload-size-boundary": "ts-node scripts/min-material-upload-size-boundary-check.ts",
-    "test:min-auth-token-hardening": "ts-node scripts/min-auth-token-hardening-check.ts"
+    "test:min-rate-limit": "ts-node scripts/min-rate-limit-check.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.0",
