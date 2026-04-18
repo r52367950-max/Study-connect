@@ -29,9 +29,10 @@ async function bootstrap() {
 
   const allowedOrigins = parseAllowedCorsOrigins();
   assertCorsConfigInProduction(allowedOrigins, isProduction);
+  const corsOriginDelegate = createCorsOriginDelegate(allowedOrigins);
 
   app.enableCors({
-    origin: createCorsOriginDelegate(allowedOrigins),
+    origin: corsOriginDelegate,
     credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
