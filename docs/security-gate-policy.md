@@ -14,6 +14,7 @@
 3. 组合攻击回归测试通过。
 4. 无新增高危告警。
 5. CORS 严格配置验证通过（生产环境必须配置 `CORS_ORIGIN`，且仅允许精确白名单 origin）。
+6. 限流 429 证据链完整（登录、上传、admin 三条链路均需同时具备「响应断言 + 日志断言」）。
 
 ## 四项自查（PR 必填）
 1. 是否解决原问题。
@@ -36,6 +37,47 @@
 - 单点修复通过。
 - 组合攻击回归通过。
 - 无新增高危告警。
+
+## 限流 429 证据链（登录 / 上传 / Admin）
+
+### 脚本与断言要求
+- 脚本：`npm run test:min-rate-limit`
+- 必须同时满足：
+  - HTTP 响应断言：三条链路均命中 `429`
+  - 日志断言：必须出现 `event=rate_limit_blocked` 且匹配对应路由/规则
+
+### 三条链路对应证据
+1. 登录链路（`POST /auth/login`）
+   - 429 证据：`login 429 check passed: 429`
+   - 日志证据：`rule=auth-login-ip-email`，`route=/auth/login`，`method=POST`
+2. 上传链路（`POST /materials`）
+   - 429 证据：`upload 429 check passed: 429`
+   - 日志证据：`rule=materials-upload`，`route=/materials`，`method=POST`
+3. Admin 链路（`GET /admin/materials/pending`）
+   - 429 证据：`admin 429 check passed: 429`
+   - 日志证据：`rule=admin-strict`，`route=/admin/materials/pending`，`method=GET`
+
+### 证据采集命令（本地/CI）
+```bash
+npm run test:min-rate-limit | tee artifacts/rate-limit-429-evidence.log
+```
+
+日志中必须出现以下关键行（示例）：
+- `login 429 check passed: 429`
+- `upload 429 check passed: 429`
+- `admin 429 check passed: 429`
+- `rate_limit_blocked log assertion passed: login/upload/admin`
+
+> 任意一条缺失，视为证据链不完整，不可合并。
+
+## CI 接入（强制门禁）
+- workflow：`.github/workflows/security-gate.yml`
+- 触发：涉及 `src/**`、`scripts/**`、`docs/security-gate-policy.md`、workflow 自身的 PR/push
+- 核心步骤：
+  1. 安装依赖：`npm ci`
+  2. 执行限流证据脚本并落盘：`npm run test:min-rate-limit | tee artifacts/rate-limit-429-evidence.log`
+  3. 使用 `grep` 对三条 429 证据 + 日志断言关键行做硬校验
+  4. 上传 `artifacts/rate-limit-429-evidence.log` 作为审计附件
 
 ## Summary 固定输出要求
 每次修补在 Summary 中固定输出以下四部分：

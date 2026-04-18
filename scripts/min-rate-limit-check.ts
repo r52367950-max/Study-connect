@@ -2,7 +2,9 @@
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { AppModule } from '../src/app.module';
+import { RateLimitService } from '../src/common/rate-limit.service';
 import { MinioService, PrismaService } from '../src/infra';
+import { AuthService } from '../src/modules/auth/auth.service';
 
 type UserRole = 'USER' | 'ADMIN';
 type MaterialStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'OFFLINE';
@@ -13,6 +15,8 @@ type DbUser = {
   username: string;
   passwordHash: string;
   role: UserRole;
+  status: 'ACTIVE' | 'BANNED';
+  tokenVersion: number;
 };
 
 type DbMaterial = {
@@ -59,6 +63,8 @@ class PrismaServiceMock {
         username: data.username,
         passwordHash: data.passwordHash,
         role: data.role,
+        status: 'ACTIVE',
+        tokenVersion: 0,
       };
       this.users.push(user);
 
@@ -163,6 +169,10 @@ class PrismaServiceMock {
     }
   }
 
+  findUserByEmail(email: string): DbUser | undefined {
+    return this.users.find((item) => item.email === email);
+  }
+
   seedApprovedMaterial(input: { uploaderEmail: string; title: string; visibility: 'PUBLIC' | 'PRIVATE' }): string {
     const uploader = this.users.find((item) => item.email === input.uploaderEmail);
     if (!uploader) {
@@ -216,6 +226,19 @@ class MinioServiceMock {
   }
 }
 
+type RateLimitLogEvent = {
+  event: 'rate_limit_blocked' | 'rate_limit_metric';
+  ts: string;
+  rule?: string;
+  key?: string;
+  route?: string;
+  method?: string;
+  ip?: string;
+  retryAfterMs?: number;
+  metric?: string;
+  value?: number;
+};
+
 function readCookiePair(setCookieHeader: string | null, cookieName: string): string {
   if (!setCookieHeader) {
     return '';
@@ -238,7 +261,7 @@ async function run(): Promise<void> {
   process.env.CORS_ORIGIN = 'http://frontend.local:3000';
 
   process.env.RATE_LIMIT_GLOBAL_LIMIT = '999';
-  process.env.RATE_LIMIT_LOGIN_LIMIT = '100';
+  process.env.RATE_LIMIT_LOGIN_LIMIT = '3';
   process.env.RATE_LIMIT_LOGIN_WINDOW_MS = '60000';
   process.env.RATE_LIMIT_LOGIN_MAX_FAILURES = '3';
   process.env.RATE_LIMIT_LOGIN_FAILURE_WINDOW_MS = '1200';
@@ -264,6 +287,25 @@ async function run(): Promise<void> {
   await app.init();
   await app.listen(0);
 
+  const rateLimitService = app.get(RateLimitService) as RateLimitService & {
+    logger?: { warn: (message: string) => void; log: (message: string) => void };
+  };
+  const capturedLogs: RateLimitLogEvent[] = [];
+  rateLimitService.logger = {
+    warn(message: string) {
+      const parsed = parseRateLimitLog(message);
+      if (parsed) {
+        capturedLogs.push(parsed);
+      }
+    },
+    log(message: string) {
+      const parsed = parseRateLimitLog(message);
+      if (parsed) {
+        capturedLogs.push(parsed);
+      }
+    },
+  };
+
   const address = app.getHttpServer().address();
   const port = typeof address === 'string' ? 3000 : address.port;
   const base = `http://127.0.0.1:${port}`;
@@ -282,7 +324,9 @@ async function run(): Promise<void> {
     };
   }
 
-  async function registerUser(input: { email: string; username: string; password: string }): Promise<void> {
+  async function registerUser(
+    input: { email: string; username: string; password: string },
+  ): Promise<{ authCookie: string }> {
     const csrf = await issueCsrfCookie();
     const res = await fetch(`${base}/auth/register`, {
       method: 'POST',
@@ -298,10 +342,18 @@ async function run(): Promise<void> {
     if (res.status !== 201) {
       throw new Error(`register ${input.email} failed, status=${res.status}, body=${await res.text()}`);
     }
+
+    return {
+      authCookie: readCookiePair(res.headers.get('set-cookie'), 'auth-token'),
+    };
   }
 
   await registerUser({ email: 'admin@example.com', username: 'admin', password: 'StrongPass123!' });
-  await registerUser({ email: 'uploader@example.com', username: 'uploader', password: 'StrongPass123!' });
+  const uploaderRegister = await registerUser({
+    email: 'uploader@example.com',
+    username: 'uploader',
+    password: 'StrongPass123!',
+  });
 
   prismaMock.setUserRole('admin@example.com', 'ADMIN');
 
@@ -330,21 +382,7 @@ async function run(): Promise<void> {
 
   await new Promise((resolve) => setTimeout(resolve, 1600));
 
-  const uploadLoginCsrf = await issueCsrfCookie();
-  const uploaderLoginRes = await fetch(`${base}/auth/login`, {
-    method: 'POST',
-    headers: {
-      origin: 'http://frontend.local:3000',
-      'content-type': 'application/json',
-      cookie: uploadLoginCsrf.cookiePair,
-      'x-csrf-token': uploadLoginCsrf.token,
-    },
-    body: JSON.stringify({ email: 'uploader@example.com', password: 'StrongPass123!' }),
-  });
-  if (uploaderLoginRes.status !== 201) {
-    throw new Error(`uploader login failed, status=${uploaderLoginRes.status}, body=${await uploaderLoginRes.text()}`);
-  }
-  const authCookie = readCookiePair(uploaderLoginRes.headers.get('set-cookie'), 'auth-token');
+  const authCookie = uploaderRegister.authCookie;
 
   let upload429 = 0;
   for (let i = 0; i < 12; i += 1) {
@@ -374,23 +412,26 @@ async function run(): Promise<void> {
     throw new Error(`upload rate limit check failed, expected 429 got ${upload429 || 'not-hit'}`);
   }
 
-  const adminLoginCsrf = await issueCsrfCookie();
-  const adminLoginRes = await fetch(`${base}/auth/login`, {
-    method: 'POST',
-    headers: {
-      origin: 'http://frontend.local:3000',
-      'content-type': 'application/json',
-      cookie: adminLoginCsrf.cookiePair,
-      'x-csrf-token': adminLoginCsrf.token,
-    },
-    body: JSON.stringify({ email: 'admin@example.com', password: 'StrongPass123!' }),
-  });
-
-  if (adminLoginRes.status !== 201) {
-    throw new Error(`admin login failed, status=${adminLoginRes.status}, body=${await adminLoginRes.text()}`);
+  const authService = app.get(AuthService) as AuthService & {
+    issueAccessToken: (
+      user: { id: string; email: string; username: string; role: UserRole },
+      tokenVersion: number,
+    ) => string;
+  };
+  const adminUser = prismaMock.findUserByEmail('admin@example.com');
+  if (!adminUser) {
+    throw new Error('admin user not found');
   }
-
-  const adminCookie = readCookiePair(adminLoginRes.headers.get('set-cookie'), 'auth-token');
+  const adminAccessToken = authService.issueAccessToken(
+    {
+      id: adminUser.id,
+      email: adminUser.email,
+      username: adminUser.username,
+      role: 'ADMIN',
+    },
+    adminUser.tokenVersion,
+  );
+  const adminCookie = `auth-token=${adminAccessToken}`;
 
   let admin429 = 0;
   for (let i = 0; i < 35; i += 1) {
@@ -408,11 +449,65 @@ async function run(): Promise<void> {
     throw new Error(`admin rate limit check failed, expected 429 got ${admin429 || 'not-hit'}`);
   }
 
+  assertBlockedLog(capturedLogs, {
+    rule: 'auth-login-ip-email',
+    route: '/auth/login',
+    method: 'POST',
+    hint: 'login',
+  });
+  assertBlockedLog(capturedLogs, {
+    rule: 'materials-upload',
+    route: '/materials',
+    method: 'POST',
+    hint: 'upload',
+  });
+  assertBlockedLog(capturedLogs, {
+    rule: 'admin-strict',
+    route: '/admin/materials/pending',
+    method: 'GET',
+    hint: 'admin',
+  });
+
   console.log('login 429 check passed:', login429);
   console.log('upload 429 check passed:', upload429);
   console.log('admin 429 check passed:', admin429);
+  console.log('rate_limit_blocked log assertion passed: login/upload/admin');
 
   await app.close();
+}
+
+function parseRateLimitLog(message: string): RateLimitLogEvent | null {
+  try {
+    const parsed = JSON.parse(message) as RateLimitLogEvent;
+    if (parsed.event === 'rate_limit_blocked' || parsed.event === 'rate_limit_metric') {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function assertBlockedLog(
+  logs: RateLimitLogEvent[],
+  expected: { rule: string; route: string; method: string; hint: string },
+): void {
+  const found = logs.find(
+    (item) =>
+      item.event === 'rate_limit_blocked' &&
+      item.rule === expected.rule &&
+      item.route === expected.route &&
+      item.method === expected.method,
+  );
+
+  if (!found) {
+    const blockedLogs = logs.filter((item) => item.event === 'rate_limit_blocked');
+    throw new Error(
+      `${expected.hint} rate_limit_blocked log assert failed, expected ${expected.method} ${expected.route} / ${expected.rule}, got=${JSON.stringify(
+        blockedLogs,
+      )}`,
+    );
+  }
 }
 
 run().catch((error: unknown) => {
