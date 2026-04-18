@@ -7,6 +7,7 @@ import { CreateRatingDto } from './dto/create-rating.dto';
 import { MaterialRatingsQueryDto } from './dto/material-ratings-query.dto';
 import { MaterialSearchQueryDto, MaterialSort } from './dto/material-search-query.dto';
 import { UploadFileInput } from './file-upload.type';
+import { UploadSecurityStatus } from './upload-security.util';
 
 export type UploadedMaterial = Pick<
   Material,
@@ -23,6 +24,7 @@ export type UploadedMaterial = Pick<
   | 'status'
   | 'uploaderId'
   | 'createdAt'
+  | 'fileSafetyStatus'
 >;
 
 @Injectable()
@@ -36,6 +38,7 @@ export class MaterialsService {
     uploaderId: string;
     dto: CreateMaterialDto;
     file: UploadFileInput;
+    safetyStatus?: UploadSecurityStatus;
   }): Promise<UploadedMaterial> {
     const safeName = params.file.originalname.replace(/\s+/g, '-');
     const key = `${new Date().toISOString().slice(0, 10)}/${randomUUID()}-${safeName}`;
@@ -55,6 +58,7 @@ export class MaterialsService {
         status: MaterialStatus.PENDING,
         fileKey: key,
         uploaderId: params.uploaderId,
+        fileSafetyStatus: params.safetyStatus ?? null,
       },
       select: {
         id: true,
@@ -70,6 +74,7 @@ export class MaterialsService {
         status: true,
         uploaderId: true,
         createdAt: true,
+        fileSafetyStatus: true,
       },
     });
 

@@ -1,12 +1,7 @@
 /// <reference path="../src/types/express.d.ts" />
 import assert from 'node:assert/strict';
 import { UnprocessableEntityException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import {
-  assertUploadFileSize,
-  getMaxUploadSizeMb,
-  MAX_UPLOAD_SIZE_MB_KEY,
-} from '../src/modules/materials/materials.controller';
+import { assertUploadFileSize, getMaxUploadSizeMb } from '../src/modules/materials/upload-security.util';
 import { UploadFileInput } from '../src/modules/materials/file-upload.type';
 
 function createFile(size: number): UploadFileInput {
@@ -18,14 +13,8 @@ function createFile(size: number): UploadFileInput {
   };
 }
 
-function createConfig(maxUploadSizeMb: string): ConfigService {
-  return {
-    get: (key: string) => (key === MAX_UPLOAD_SIZE_MB_KEY ? maxUploadSizeMb : undefined),
-  } as unknown as ConfigService;
-}
-
 async function run(): Promise<void> {
-  const maxUploadSizeMb = getMaxUploadSizeMb(createConfig('1'));
+  const maxUploadSizeMb = getMaxUploadSizeMb('1');
   const oneMb = 1024 * 1024;
 
   assert.doesNotThrow(() => {
