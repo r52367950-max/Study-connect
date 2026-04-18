@@ -45,11 +45,19 @@ async function run(): Promise<void> {
   // 2) 非白名单 origin
   const denyResult = await runOriginCheck(delegate, 'https://evil.example.com');
   assert(denyResult.error instanceof Error, 'non-whitelisted origin should fail');
+  assert(
+    denyResult.error?.message.includes('is not allowed') === true,
+    'non-whitelisted origin should return not allowed message',
+  );
 
   // 3) 未配置
   const unconfiguredDelegate = createCorsOriginDelegate(parseAllowedCorsOrigins(undefined));
   const unconfiguredResult = await runOriginCheck(unconfiguredDelegate, 'https://app.example.com');
   assert(unconfiguredResult.error instanceof Error, 'unconfigured CORS should fail');
+  assert(
+    unconfiguredResult.error?.message === 'CORS is not configured',
+    'unconfigured CORS should return explicit unconfigured message',
+  );
 
   const emptyOriginResult = await runOriginCheck(delegate, undefined);
   assert(emptyOriginResult.error instanceof Error, 'empty origin should fail');
