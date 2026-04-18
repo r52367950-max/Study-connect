@@ -12,6 +12,12 @@ type DbUser = {
   role: 'USER' | 'ADMIN';
 };
 
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
 type DbMaterial = {
   id: string;
   title: string;
@@ -206,7 +212,8 @@ async function run(): Promise<void> {
       password: 'StrongPass123!',
     }),
   });
-  const loginJson = (await loginRes.json()) as { accessToken: string };
+  await loginRes.text();
+  const authCookie = loginRes.headers.get('set-cookie') ?? '';
 
   const form = new FormData();
   form.set('title', 'Task3 Upload Demo');
@@ -217,7 +224,7 @@ async function run(): Promise<void> {
   const uploadRes = await fetch(`${base}/materials`, {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${loginJson.accessToken}`,
+      cookie: authCookie,
     },
     body: form,
   });
@@ -226,7 +233,6 @@ async function run(): Promise<void> {
   console.log('upload status:', uploadRes.status);
   console.log('upload body:', uploadBody);
 
-
   const badTypeForm = new FormData();
   badTypeForm.set('title', 'Bad Type');
   badTypeForm.set('file', new Blob(['MZ'], { type: 'application/octet-stream' }), 'bad.exe');
@@ -234,7 +240,7 @@ async function run(): Promise<void> {
   const badTypeRes = await fetch(`${base}/materials`, {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${loginJson.accessToken}`,
+      cookie: authCookie,
     },
     body: badTypeForm,
   });
@@ -252,7 +258,7 @@ async function run(): Promise<void> {
   const tooLargeRes = await fetch(`${base}/materials`, {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${loginJson.accessToken}`,
+      cookie: authCookie,
     },
     body: tooLargeForm,
   });
@@ -263,6 +269,12 @@ async function run(): Promise<void> {
   const latest = prismaMock.debugLatestMaterial();
   console.log('db latest material:', JSON.stringify(latest));
   console.log('minio object count:', minioMock.debugObjectCount());
+
+  assert(uploadRes.status === 201, `valid upload should be 201, got ${uploadRes.status}`);
+  assert(badTypeRes.status === 422, `disguised file type should be blocked with 422, got ${badTypeRes.status}`);
+  assert(tooLargeRes.status === 422, `oversized upload should be blocked with 422, got ${tooLargeRes.status}`);
+  assert(latest?.title === 'Task3 Upload Demo', 'last persisted material should be the valid upload record');
+  assert(minioMock.debugObjectCount() === 1, `only one object should be stored, got ${minioMock.debugObjectCount()}`);
 
   await app.close();
 }
