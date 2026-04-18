@@ -3,20 +3,26 @@ import type { User } from '@/types'
 
 interface AuthState {
   user: User | null
+  accessToken: string | null
   initialized: boolean
-  setAuth: (user: User) => void
+  setAuth: (user: User, accessToken?: string) => void
   clearAuth: () => void
   markInitialized: () => void
 }
 
 export const useAuthStore = create<AuthState>()((set) => ({
   user: null,
+  accessToken: null,
   initialized: false,
-  setAuth: (user: User) => {
-    set({ user, initialized: true })
+  setAuth: (user: User, accessToken?: string) => {
+    set((state) => ({
+      user,
+      accessToken: accessToken ?? state.accessToken,
+      initialized: true,
+    }))
   },
   clearAuth: () => {
-    set({ user: null, initialized: true })
+    set({ user: null, accessToken: null, initialized: true })
   },
   markInitialized: () => {
     set({ initialized: true })

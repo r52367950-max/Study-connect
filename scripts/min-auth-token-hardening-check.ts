@@ -73,6 +73,7 @@ function extractAuthToken(cookie: string): string {
 
 async function run(): Promise<void> {
   process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'test-secret';
+  process.env.CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://frontend.local:3000';
 
   const prismaMock = new PrismaServiceMock();
 
@@ -99,25 +100,62 @@ async function run(): Promise<void> {
   const address = server.address();
   const port = typeof address === 'string' ? 3000 : address.port;
   const base = `http://127.0.0.1:${port}`;
+  const allowedOrigin = 'http://frontend.local:3000';
+  const evilOrigin = 'http://evil.example';
+  const issueCsrf = async (): Promise<{ token: string; cookiePair: string }> => {
+    const csrfRes = await fetch(`${base}/auth/csrf`, {
+      headers: { origin: allowedOrigin },
+    });
+    const csrfBody = (await csrfRes.json()) as { csrfToken: string };
+    return {
+      token: csrfBody.csrfToken,
+      cookiePair: (csrfRes.headers.get('set-cookie') ?? '').split(';')[0] ?? '',
+    };
+  };
 
-  await fetch(`${base}/auth/register`, {
+  const registerCsrf = await issueCsrf();
+
+  const registerRes = await fetch(`${base}/auth/register`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      origin: allowedOrigin,
+      cookie: registerCsrf.cookiePair,
+      'x-csrf-token': registerCsrf.token,
+    },
     body: JSON.stringify({
       email: 'student@example.com',
       username: 'student',
       password: 'StrongPass123!',
     }),
   });
+  if (registerRes.status !== 201) {
+    throw new Error(`register expected 201, got ${registerRes.status}`);
+  }
+
+  const loginCsrf = await issueCsrf();
 
   const loginRes = await fetch(`${base}/auth/login`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      origin: allowedOrigin,
+      cookie: loginCsrf.cookiePair,
+      'x-csrf-token': loginCsrf.token,
+    },
     body: JSON.stringify({ email: 'student@example.com', password: 'StrongPass123!' }),
   });
+  if (loginRes.status !== 201) {
+    throw new Error(`login expected 201, got ${loginRes.status}`);
+  }
 
   const setCookie = loginRes.headers.get('set-cookie') ?? '';
   const validToken = extractAuthToken(setCookie);
+
+  const missingTokenRes = await fetch(`${base}/auth/me`);
+  if (missingTokenRes.status !== 401) {
+    throw new Error(`missing token expected 401, got ${missingTokenRes.status}`);
+  }
 
   const malformedToken = 'not-a-jwt-token';
   const truncatedToken = validToken.split('.').slice(0, 2).join('.');
@@ -157,6 +195,32 @@ async function run(): Promise<void> {
   console.log('valid token status:', validTokenRes.status);
   if (validTokenRes.status !== 200) {
     throw new Error('valid token should remain accepted');
+  }
+
+  const logoutCsrf = await issueCsrf();
+
+  const forgedCsrfRes = await fetch(`${base}/auth/logout`, {
+    method: 'POST',
+    headers: {
+      origin: allowedOrigin,
+      cookie: `auth-token=${encodeURIComponent(validToken)}; ${logoutCsrf.cookiePair}`,
+      'x-csrf-token': `${logoutCsrf.token}-forged`,
+    },
+  });
+  if (forgedCsrfRes.status !== 403) {
+    throw new Error(`forged csrf token expected 403, got ${forgedCsrfRes.status}`);
+  }
+
+  const crossSiteRes = await fetch(`${base}/auth/logout`, {
+    method: 'POST',
+    headers: {
+      origin: evilOrigin,
+      cookie: `auth-token=${encodeURIComponent(validToken)}; ${logoutCsrf.cookiePair}`,
+      'x-csrf-token': logoutCsrf.token,
+    },
+  });
+  if (crossSiteRes.status !== 403) {
+    throw new Error(`cross-site logout expected 403, got ${crossSiteRes.status}`);
   }
 
   await app.close();

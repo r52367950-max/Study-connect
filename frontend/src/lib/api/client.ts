@@ -57,6 +57,18 @@ async function ensureCsrfToken(): Promise<string> {
 apiClient.interceptors.request.use(async (config) => {
   const method = (config.method ?? 'get').toLowerCase()
   const requestUrl = config.url ?? ''
+  const accessToken = useAuthStore.getState().accessToken
+
+  if (accessToken) {
+    if (typeof config.headers?.set === 'function') {
+      config.headers.set('Authorization', `Bearer ${accessToken}`)
+    } else {
+      config.headers = {
+        ...(config.headers ?? {}),
+        Authorization: `Bearer ${accessToken}`,
+      }
+    }
+  }
 
   if (!STATE_CHANGING_METHODS.has(method) || isCsrfBootstrapRequest(requestUrl)) {
     return config
