@@ -36,8 +36,14 @@ export function createCorsOriginDelegate(
   allowedOrigins: string[],
 ): (origin: string | undefined, callback: (error: Error | null, allow?: boolean) => void) => void {
   const allowedOriginSet = new Set(allowedOrigins);
+  const isConfigured = allowedOriginSet.size > 0;
 
   return (origin, callback): void => {
+    if (!isConfigured) {
+      callback(new Error('CORS is not configured'));
+      return;
+    }
+
     if (!origin) {
       callback(new Error('CORS origin is required'));
       return;
