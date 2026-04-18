@@ -262,10 +262,11 @@ async function run(): Promise<void> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ email: 'downloader@example.com', password: 'StrongPass123!' }),
   });
-  const loginBody = (await loginRes.json()) as { accessToken: string };
+  await loginRes.text();
+  const authCookie = loginRes.headers.get('set-cookie') ?? '';
 
   const approvedRes = await fetch(`${base}/materials/${seeded.approvedId}/download`, {
-    headers: { authorization: `Bearer ${loginBody.accessToken}` },
+    headers: { cookie: authCookie },
   });
   assert(approvedRes.status === 200, `approved material download should be 200, got ${approvedRes.status}`);
   const approvedBody = (await approvedRes.json()) as { downloadUrl: string; materialId: string };
@@ -276,12 +277,12 @@ async function run(): Promise<void> {
   assert(approvedBody.materialId === seeded.approvedId, 'approved response should keep material id');
 
   const pendingRes = await fetch(`${base}/materials/${seeded.pendingId}/download`, {
-    headers: { authorization: `Bearer ${loginBody.accessToken}` },
+    headers: { cookie: authCookie },
   });
   assert(pendingRes.status === 404, `pending material download should be 404, got ${pendingRes.status}`);
 
   const privateApprovedRes = await fetch(`${base}/materials/${seeded.privateApprovedId}/download`, {
-    headers: { authorization: `Bearer ${loginBody.accessToken}` },
+    headers: { cookie: authCookie },
   });
   assert(
     privateApprovedRes.status === 404,

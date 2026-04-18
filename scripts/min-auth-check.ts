@@ -12,6 +12,12 @@ type DbUser = {
   role: 'USER' | 'ADMIN';
 };
 
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
 class PrismaServiceMock {
   private users: DbUser[] = [];
 
@@ -203,17 +209,17 @@ async function run(): Promise<void> {
     headers: { cookie: logoutRes.headers.get('set-cookie') ?? '' },
   });
 
-  console.log('user login status:', loginUserRes.status);
-  console.log('admin login status:', loginAdminRes.status);
-  console.log('me status:', meRes.status, 'body:', await meRes.text());
-  console.log('logout status:', logoutRes.status);
-  console.log('me after logout status:', meAfterLogoutRes.status, 'body:', await meAfterLogoutRes.text());
-  console.log('admin by USER status:', adminByUserRes.status, 'body:', await adminByUserRes.text());
-  console.log('admin by ADMIN status:', adminByAdminRes.status, 'body:', await adminByAdminRes.text());
-  console.log('user login has user profile:', Boolean(loginUserJson.user?.id));
-  console.log('admin login has user profile:', Boolean(loginAdminJson.user?.id));
-  console.log('user cookie set:', Boolean(userCookie));
-  console.log('admin cookie set:', Boolean(adminCookie));
+  assert(loginUserRes.status === 201, `user login should be 201, got ${loginUserRes.status}`);
+  assert(loginAdminRes.status === 201, `admin login should be 201, got ${loginAdminRes.status}`);
+  assert(meRes.status === 200, `auth/me should be 200, got ${meRes.status}`);
+  assert(logoutRes.status === 201, `logout should be 201, got ${logoutRes.status}`);
+  assert(meAfterLogoutRes.status === 401, `auth/me after logout should be 401, got ${meAfterLogoutRes.status}`);
+  assert(adminByUserRes.status === 403, `user should not access admin endpoint, got ${adminByUserRes.status}`);
+  assert(adminByAdminRes.status === 200, `admin should access admin endpoint, got ${adminByAdminRes.status}`);
+  assert(Boolean(loginUserJson.user?.id), 'user login should include user profile id');
+  assert(Boolean(loginAdminJson.user?.id), 'admin login should include user profile id');
+  assert(Boolean(userCookie), 'user login should set auth cookie');
+  assert(Boolean(adminCookie), 'admin login should set auth cookie');
 
   await app.close();
 }

@@ -1,0 +1,26 @@
+name: Security Attack Chain Gate
+
+on:
+  pull_request:
+    branches: ['**']
+  push:
+    branches: ['main', 'master']
+
+jobs:
+  composite-attack-chain-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Composite attack-chain regression gate
+        run: npm run test:security-attack-chain
