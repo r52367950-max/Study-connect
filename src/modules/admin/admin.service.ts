@@ -1,5 +1,5 @@
 import { Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
-import { MaterialStatus } from '@prisma/client';
+import { MaterialStatus, UserStatus } from '@prisma/client';
 import { PrismaService } from '../../infra';
 
 @Injectable()
@@ -62,6 +62,20 @@ export class AdminService {
     return this.updateMaterialReview(materialId, {
       status: MaterialStatus.REJECTED,
       reviewComment: `[${adminId}] ${reason}`,
+    });
+  }
+
+  async banUser(userId: string) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        status: UserStatus.BANNED,
+        tokenVersion: { increment: 1 },
+      },
+      select: {
+        id: true,
+        status: true,
+      },
     });
   }
 

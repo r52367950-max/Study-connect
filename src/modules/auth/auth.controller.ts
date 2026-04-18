@@ -12,6 +12,7 @@ import { RateLimit } from '../../common/rate-limit.decorator';
 import { Public } from './decorators/public.decorator';
 import { Roles } from './decorators/roles.decorator';
 import { AuthResponseDto, AuthUserDto } from './dto/auth-response.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RolesGuard } from './guards/roles.guard';
@@ -58,7 +59,7 @@ export class AuthController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<AuthResponseDto> {
     const authResult = await this.authService.register(dto);
-    this.setAuthCookie(response, authResult.accessToken);
+    this.setAuthCookies(response, authResult.accessToken, authResult.refreshToken);
     return { user: authResult.user };
   }
 
@@ -77,8 +78,28 @@ export class AuthController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<AuthResponseDto> {
     const authResult = await this.authService.login(dto, req.ip);
-    this.setAuthCookie(response, authResult.accessToken);
+    this.setAuthCookies(response, authResult.accessToken, authResult.refreshToken);
     return { user: authResult.user };
+  }
+
+  @Public()
+  @Post('refresh')
+  @ApiOperation({ summary: 'Refresh short-lived access token' })
+  @ApiOkResponse({
+    schema: {
+      properties: {
+        success: { type: 'boolean', example: true },
+      },
+    },
+  })
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<{ success: true }> {
+    const refreshToken = this.extractCookieToken(req, 'refresh-token');
+    const authResult = await this.authService.refreshAccessToken(refreshToken);
+    this.setAuthCookies(response, authResult.accessToken, authResult.refreshToken);
+    return { success: true };
   }
 
   @Public()
@@ -96,13 +117,35 @@ export class AuthController {
       },
     },
   })
-  logout(@Res({ passthrough: true }) response: Response): { success: true } {
-    response.clearCookie('auth-token', {
-      httpOnly: true,
-      secure: this.getCookieSecure(),
-      sameSite: this.getCookieSameSite(),
-      path: '/',
-    });
+  async logout(
+    @Req() req: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<{ success: true }> {
+    const token = this.extractCookieToken(req, 'auth-token');
+    if (token) {
+      const user = await this.authService.verifyAccessToken(token);
+      await this.authService.rotateTokenVersion(user.id);
+    }
+    this.clearAuthCookies(response);
+    return { success: true };
+  }
+
+  @Post('change-password')
+  @ApiOperation({ summary: 'Change password and invalidate all active sessions' })
+  @ApiOkResponse({
+    schema: {
+      properties: {
+        success: { type: 'boolean', example: true },
+      },
+    },
+  })
+  async changePassword(
+    @Req() req: Request,
+    @Body() dto: ChangePasswordDto,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<{ success: true }> {
+    await this.authService.changePassword(req.user.id, dto.currentPassword, dto.newPassword);
+    this.clearAuthCookies(response);
     return { success: true };
   }
 
@@ -122,14 +165,47 @@ export class AuthController {
     };
   }
 
-  private setAuthCookie(response: Response, token: string): void {
-    response.cookie('auth-token', token, {
+  private setAuthCookies(response: Response, accessToken: string, refreshToken: string): void {
+    response.cookie('auth-token', accessToken, {
       httpOnly: true,
       secure: this.getCookieSecure(),
       sameSite: this.getCookieSameSite(),
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: this.getAccessTtlMilliseconds(),
       path: '/',
     });
+    response.cookie('refresh-token', refreshToken, {
+      httpOnly: true,
+      secure: this.getCookieSecure(),
+      sameSite: this.getCookieSameSite(),
+      maxAge: this.getRefreshTtlMilliseconds(),
+      path: '/',
+    });
+  }
+
+  private clearAuthCookies(response: Response): void {
+    const options = {
+      httpOnly: true,
+      secure: this.getCookieSecure(),
+      sameSite: this.getCookieSameSite(),
+      path: '/',
+    } as const;
+    response.clearCookie('auth-token', options);
+    response.clearCookie('refresh-token', options);
+  }
+
+  private extractCookieToken(request: Request, key: 'auth-token' | 'refresh-token'): string {
+    const cookieHeader = request.headers.cookie;
+    if (!cookieHeader) {
+      return '';
+    }
+    const cookieEntries = cookieHeader.split(';');
+    for (const entry of cookieEntries) {
+      const [rawName, ...rawValue] = entry.trim().split('=');
+      if (rawName === key && rawValue.length > 0) {
+        return decodeURIComponent(rawValue.join('='));
+      }
+    }
+    return '';
   }
 
   private getCookieSecure(): boolean {
@@ -142,5 +218,19 @@ export class AuthController {
       return sameSite;
     }
     return 'lax';
+  }
+
+  private getAccessTtlMilliseconds(): number {
+    return this.getEnvPositiveInteger('JWT_ACCESS_TTL_SECONDS', 15 * 60) * 1000;
+  }
+
+  private getRefreshTtlMilliseconds(): number {
+    return this.getEnvPositiveInteger('JWT_REFRESH_TTL_SECONDS', 7 * 24 * 60 * 60) * 1000;
+  }
+
+  private getEnvPositiveInteger(key: string, fallback: number): number {
+    const raw = process.env[key];
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
   }
 }

@@ -11,6 +11,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "test:min-auth": "ts-node scripts/min-auth-check.ts",
+    "test:min-auth-session-invalidation": "ts-node scripts/min-auth-session-invalidation-check.ts",
     "test:min-material-upload": "ts-node scripts/min-material-upload-check.ts",
     "test:min-admin-review": "ts-node scripts/min-admin-review-check.ts",
     "test:min-material-search": "ts-node scripts/min-material-search-check.ts",

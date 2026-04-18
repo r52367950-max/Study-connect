@@ -3,6 +3,7 @@ const { spawnSync } = require('node:child_process');
 
 const checks = [
   'test:min-auth',
+  'test:min-auth-session-invalidation',
   'test:min-material-upload',
   'test:min-admin-review',
   'test:min-material-search',

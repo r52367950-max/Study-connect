@@ -1,12 +1,13 @@
 import {
   BadRequestException,
+  ForbiddenException,
   HttpException,
   HttpStatus,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { User, UserRole } from '@prisma/client';
+import { User, UserRole, UserStatus } from '@prisma/client';
 import { randomBytes, scryptSync, timingSafeEqual, createHmac } from 'crypto';
 import { PrismaService } from '../../infra';
 import { RateLimitService } from '../../common/rate-limit.service';
@@ -16,10 +17,19 @@ import { RegisterDto } from './dto/register.dto';
 export type AuthUser = Pick<User, 'id' | 'email' | 'username' | 'role'>;
 
 type AccessPayload = {
+  type: 'access';
   sub: string;
   email: string;
   username: string;
   role: UserRole;
+  ver: number;
+  exp: number;
+};
+
+type RefreshPayload = {
+  type: 'refresh';
+  sub: string;
+  ver: number;
   exp: number;
 };
 
@@ -31,7 +41,7 @@ export class AuthService {
     private readonly rateLimitService: RateLimitService,
   ) {}
 
-  async register(dto: RegisterDto): Promise<{ accessToken: string; user: AuthUser }> {
+  async register(dto: RegisterDto): Promise<{ accessToken: string; refreshToken: string; user: AuthUser }> {
     const existing = await this.prisma.user.findFirst({
       where: {
         OR: [{ email: dto.email }, { username: dto.username }],
@@ -60,12 +70,13 @@ export class AuthService {
     });
 
     return {
-      accessToken: this.issueAccessToken(user),
+      accessToken: this.issueAccessToken(user, 0),
+      refreshToken: this.issueRefreshToken(user.id, 0),
       user,
     };
   }
 
-  async login(dto: LoginDto, ipAddress = 'unknown'): Promise<{ accessToken: string; user: AuthUser }> {
+  async login(dto: LoginDto, ipAddress = 'unknown'): Promise<{ accessToken: string; refreshToken: string; user: AuthUser }> {
     const email = dto.email.toLowerCase();
     const lock = this.rateLimitService.checkLoginLock(`login-email:${email}`);
     if (lock.locked) {
@@ -79,7 +90,8 @@ export class AuthService {
       where: { email: dto.email },
     });
 
-    if (!user || !this.verifyPassword(dto.password, user.passwordHash)) {
+    const userStatus = user && 'status' in user ? user.status : UserStatus.ACTIVE;
+    if (!user || userStatus === UserStatus.BANNED || !this.verifyPassword(dto.password, user.passwordHash)) {
       this.rateLimitService.recordLoginFailure({
         email,
         ip: ipAddress,
@@ -100,24 +112,111 @@ export class AuthService {
     };
 
     return {
-      accessToken: this.issueAccessToken(profile),
+      accessToken: this.issueAccessToken(profile, user.tokenVersion ?? 0),
+      refreshToken: this.issueRefreshToken(user.id, user.tokenVersion ?? 0),
       user: profile,
     };
   }
 
   async verifyAccessToken(token: string): Promise<AuthUser> {
-    const payload = this.parseAndVerifyToken(token);
+    const payload = this.parseAndVerifyAccessToken(token);
 
     if (payload.exp <= Math.floor(Date.now() / 1000)) {
       throw new UnauthorizedException('Token expired');
     }
 
+    const user = await this.prisma.user.findUnique({
+      where: { email: payload.email },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        role: true,
+        status: true,
+        tokenVersion: true,
+      },
+    });
+
+    const userStatus = user && 'status' in user ? user.status : UserStatus.ACTIVE;
+    const tokenVersion = user?.tokenVersion ?? 0;
+    if (!user || user.id !== payload.sub || userStatus === UserStatus.BANNED || tokenVersion !== payload.ver) {
+      throw new UnauthorizedException('Token invalidated');
+    }
+
     return {
-      id: payload.sub,
-      email: payload.email,
-      username: payload.username,
-      role: payload.role,
+      id: user.id,
+      email: user.email,
+      username: user.username,
+      role: user.role,
     };
+  }
+
+  async refreshAccessToken(refreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
+    const payload = this.parseAndVerifyRefreshToken(refreshToken);
+    if (payload.exp <= Math.floor(Date.now() / 1000)) {
+      throw new UnauthorizedException('Refresh token expired');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: { id: true, status: true, tokenVersion: true },
+    });
+
+    if (!user || user.status === UserStatus.BANNED || user.tokenVersion !== payload.ver) {
+      throw new UnauthorizedException('Refresh token invalidated');
+    }
+
+    return {
+      accessToken: this.issueAccessToken(await this.getAuthUser(user.id), user.tokenVersion),
+      refreshToken: this.issueRefreshToken(user.id, user.tokenVersion),
+    };
+  }
+
+  async rotateTokenVersion(userId: string): Promise<void> {
+    if (typeof (this.prisma.user as { update?: unknown }).update !== 'function') {
+      return;
+    }
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { tokenVersion: { increment: 1 } },
+    });
+  }
+
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, passwordHash: true, status: true },
+    });
+
+    if (!user || user.status === UserStatus.BANNED) {
+      throw new UnauthorizedException('User not available');
+    }
+
+    if (!this.verifyPassword(currentPassword, user.passwordHash)) {
+      throw new ForbiddenException('Current password is incorrect');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        passwordHash: this.hashPassword(newPassword),
+        tokenVersion: { increment: 1 },
+      },
+    });
+  }
+
+  async banUser(userId: string): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        status: UserStatus.BANNED,
+        tokenVersion: { increment: 1 },
+      },
+    });
   }
 
   private hashPassword(password: string): string {
@@ -143,14 +242,16 @@ export class AuthService {
     return timingSafeEqual(savedBuffer, inputHash);
   }
 
-  private issueAccessToken(user: AuthUser): string {
+  private issueAccessToken(user: AuthUser, tokenVersion: number): string {
     const header = { alg: 'HS256', typ: 'JWT' };
     const payload: AccessPayload = {
+      type: 'access',
       sub: user.id,
       email: user.email,
       username: user.username,
       role: user.role,
-      exp: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60,
+      ver: tokenVersion,
+      exp: Math.floor(Date.now() / 1000) + this.getNumber('JWT_ACCESS_TTL_SECONDS', 15 * 60),
     };
 
     const encodedHeader = this.base64UrlEncode(JSON.stringify(header));
@@ -161,7 +262,53 @@ export class AuthService {
     return `${unsigned}.${signature}`;
   }
 
-  private parseAndVerifyToken(token: string): AccessPayload {
+  private issueRefreshToken(userId: string, tokenVersion: number): string {
+    const header = { alg: 'HS256', typ: 'JWT' };
+    const payload: RefreshPayload = {
+      type: 'refresh',
+      sub: userId,
+      ver: tokenVersion,
+      exp: Math.floor(Date.now() / 1000) + this.getNumber('JWT_REFRESH_TTL_SECONDS', 7 * 24 * 60 * 60),
+    };
+
+    const encodedHeader = this.base64UrlEncode(JSON.stringify(header));
+    const encodedPayload = this.base64UrlEncode(JSON.stringify(payload));
+    const unsigned = `${encodedHeader}.${encodedPayload}`;
+    const signature = this.sign(unsigned);
+
+    return `${unsigned}.${signature}`;
+  }
+
+  private parseAndVerifyAccessToken(token: string): AccessPayload {
+    const payload = this.parseAndVerifyToken(token) as Partial<AccessPayload>;
+    if (
+      payload.type !== 'access' ||
+      !payload.sub ||
+      !payload.email ||
+      !payload.username ||
+      !payload.role ||
+      typeof payload.ver !== 'number' ||
+      !payload.exp
+    ) {
+      throw new UnauthorizedException('Invalid token');
+    }
+    return payload as AccessPayload;
+  }
+
+  private parseAndVerifyRefreshToken(token: string): RefreshPayload {
+    const payload = this.parseAndVerifyToken(token) as Partial<RefreshPayload>;
+    if (
+      payload.type !== 'refresh' ||
+      !payload.sub ||
+      typeof payload.ver !== 'number' ||
+      !payload.exp
+    ) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+    return payload as RefreshPayload;
+  }
+
+  private parseAndVerifyToken(token: string): Record<string, unknown> {
     try {
       const parts = token.split('.');
       if (parts.length !== 3) {
@@ -177,16 +324,32 @@ export class AuthService {
       }
 
       const payloadText = this.base64UrlDecode(encodedPayload);
-      const payload = JSON.parse(payloadText) as Partial<AccessPayload>;
-
-      if (!payload.sub || !payload.email || !payload.username || !payload.role || !payload.exp) {
-        throw new Error('Malformed token payload');
-      }
-
-      return payload as AccessPayload;
+      return JSON.parse(payloadText) as Record<string, unknown>;
     } catch {
       throw new UnauthorizedException('Invalid token');
     }
+  }
+
+  private async getAuthUser(userId: string): Promise<AuthUser> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        role: true,
+        status: true,
+      },
+    });
+    if (!user || user.status === UserStatus.BANNED) {
+      throw new UnauthorizedException('User not available');
+    }
+    return {
+      id: user.id,
+      email: user.email,
+      username: user.username,
+      role: user.role,
+    };
   }
 
   private sign(input: string): string {
