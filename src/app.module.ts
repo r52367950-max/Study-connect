@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, Provider, Type } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { RateLimitGuard } from './common/rate-limit.guard';
@@ -14,6 +14,13 @@ import { MaterialsModule } from './modules/materials/materials.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { SearchModule } from './modules/search/search.module';
 import { UsersModule } from './modules/users/users.module';
+
+export const APP_GUARD_CHAIN = [RateLimitGuard, CsrfGuard, JwtAuthGuard, RolesGuard] as const;
+
+const appGuardProviders: Provider[] = APP_GUARD_CHAIN.map((guardClass: Type<unknown>) => ({
+  provide: APP_GUARD,
+  useClass: guardClass,
+}));
 
 @Module({
   imports: [
@@ -31,23 +38,6 @@ import { UsersModule } from './modules/users/users.module';
     DownloadsModule,
     SearchModule,
   ],
-  providers: [
-    {
-      provide: APP_GUARD,
-      useClass: RateLimitGuard,
-    },
-    {
-      provide: APP_GUARD,
-      useClass: CsrfGuard,
-    },
-    {
-      provide: APP_GUARD,
-      useClass: JwtAuthGuard,
-    },
-    {
-      provide: APP_GUARD,
-      useClass: RolesGuard,
-    },
-  ],
+  providers: appGuardProviders,
 })
 export class AppModule {}
