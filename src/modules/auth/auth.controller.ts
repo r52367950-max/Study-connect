@@ -7,6 +7,7 @@ import {
 } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { Request, Response } from 'express';
+import { CsrfService } from '../../common/security/csrf.service';
 import { Public } from './decorators/public.decorator';
 import { Roles } from './decorators/roles.decorator';
 import { AuthResponseDto, AuthUserDto } from './dto/auth-response.dto';
@@ -18,7 +19,24 @@ import { AuthService } from './auth.service';
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly csrfService: CsrfService,
+  ) {}
+
+  @Public()
+  @Get('csrf')
+  @ApiOperation({ summary: 'Issue CSRF token cookie for state-changing requests' })
+  @ApiOkResponse({
+    schema: {
+      properties: {
+        csrfToken: { type: 'string' },
+      },
+    },
+  })
+  csrf(@Res({ passthrough: true }) response: Response): { csrfToken: string } {
+    return { csrfToken: this.csrfService.issueToken(response) };
+  }
 
   @Public()
   @Post('register')

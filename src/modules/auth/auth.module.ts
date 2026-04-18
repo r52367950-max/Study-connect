@@ -7,7 +7,7 @@ import { RolesGuard } from './guards/roles.guard';
 @Module({
   imports: [RateLimitModule],
   controllers: [AuthController],
-  providers: [AuthService, RolesGuard],
-  exports: [AuthService],
+  providers: [AuthService, RolesGuard, CsrfService],
+  exports: [AuthService, CsrfService],
 })
 export class AuthModule {}
