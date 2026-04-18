@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { CsrfGuard } from './common/security/csrf.guard';
 import { PrismaModule } from './infra';
 import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -28,6 +29,10 @@ import { UsersModule } from './modules/users/users.module';
     SearchModule,
   ],
   providers: [
+    {
+      provide: APP_GUARD,
+      useClass: CsrfGuard,
+    },
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,

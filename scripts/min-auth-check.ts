@@ -73,6 +73,7 @@ class PrismaServiceMock {
 
 async function run(): Promise<void> {
   process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'test-secret';
+  process.env.CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://frontend.local:3000';
 
   const prismaMock = new PrismaServiceMock();
 
@@ -99,10 +100,36 @@ async function run(): Promise<void> {
   const address = server.address();
   const port = typeof address === 'string' ? 3000 : address.port;
   const base = `http://127.0.0.1:${port}`;
+  const allowedOrigin = 'http://frontend.local:3000';
+
+  function getCookiePair(setCookieHeader: string | null): string {
+    return (setCookieHeader ?? '').split(';')[0] ?? '';
+  }
+
+  async function issueCsrfCookie(existingCookies = ''): Promise<{ token: string; cookiePair: string }> {
+    const csrfRes = await fetch(`${base}/auth/csrf`, {
+      headers: {
+        origin: allowedOrigin,
+        ...(existingCookies ? { cookie: existingCookies } : {}),
+      },
+    });
+    const json = (await csrfRes.json()) as { csrfToken: string };
+    return {
+      token: json.csrfToken,
+      cookiePair: getCookiePair(csrfRes.headers.get('set-cookie')),
+    };
+  }
+
+  const registerCsrf1 = await issueCsrfCookie();
 
   await fetch(`${base}/auth/register`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      origin: allowedOrigin,
+      cookie: registerCsrf1.cookiePair,
+      'x-csrf-token': registerCsrf1.token,
+    },
     body: JSON.stringify({
       email: 'student@example.com',
       username: 'student',
@@ -110,9 +137,15 @@ async function run(): Promise<void> {
     }),
   });
 
+  const registerCsrf2 = await issueCsrfCookie();
   await fetch(`${base}/auth/register`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      origin: allowedOrigin,
+      cookie: registerCsrf2.cookiePair,
+      'x-csrf-token': registerCsrf2.token,
+    },
     body: JSON.stringify({
       email: 'admin@example.com',
       username: 'admin',
@@ -122,21 +155,33 @@ async function run(): Promise<void> {
 
   prismaMock.setUserRole('admin@example.com', 'ADMIN');
 
+  const loginUserCsrf = await issueCsrfCookie();
   const loginUserRes = await fetch(`${base}/auth/login`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      origin: allowedOrigin,
+      cookie: loginUserCsrf.cookiePair,
+      'x-csrf-token': loginUserCsrf.token,
+    },
     body: JSON.stringify({ email: 'student@example.com', password: 'StrongPass123!' }),
   });
   const loginUserJson = (await loginUserRes.json()) as { user: { id: string } };
-  const userCookie = loginUserRes.headers.get('set-cookie') ?? '';
+  const userCookie = getCookiePair(loginUserRes.headers.get('set-cookie'));
 
+  const loginAdminCsrf = await issueCsrfCookie();
   const loginAdminRes = await fetch(`${base}/auth/login`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      origin: allowedOrigin,
+      cookie: loginAdminCsrf.cookiePair,
+      'x-csrf-token': loginAdminCsrf.token,
+    },
     body: JSON.stringify({ email: 'admin@example.com', password: 'StrongPass123!' }),
   });
   const loginAdminJson = (await loginAdminRes.json()) as { user: { id: string } };
-  const adminCookie = loginAdminRes.headers.get('set-cookie') ?? '';
+  const adminCookie = getCookiePair(loginAdminRes.headers.get('set-cookie'));
 
   const meRes = await fetch(`${base}/auth/me`, {
     headers: { cookie: userCookie },
@@ -150,9 +195,14 @@ async function run(): Promise<void> {
     headers: { cookie: adminCookie },
   });
 
+  const logoutCsrf = await issueCsrfCookie(userCookie);
   const logoutRes = await fetch(`${base}/auth/logout`, {
     method: 'POST',
-    headers: { cookie: userCookie },
+    headers: {
+      origin: allowedOrigin,
+      cookie: `${userCookie}; ${logoutCsrf.cookiePair}`,
+      'x-csrf-token': logoutCsrf.token,
+    },
   });
 
   const meAfterLogoutRes = await fetch(`${base}/auth/me`, {
