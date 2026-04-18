@@ -12,7 +12,6 @@ import {
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
@@ -30,37 +29,13 @@ import { MaterialRatingsQueryDto } from './dto/material-ratings-query.dto';
 import { MaterialSearchQueryDto } from './dto/material-search-query.dto';
 import { UploadFileInput } from './file-upload.type';
 import { MaterialsService, UploadedMaterial } from './materials.service';
-
-const ALLOWED_MIME_TYPES = [
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-powerpoint',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  'application/zip',
-  'text/plain',
-];
-
-const MAX_UPLOAD_SIZE_MB_KEY = 'MAX_UPLOAD_SIZE_MB';
-const DEFAULT_MAX_UPLOAD_SIZE_MB = 50;
-
-function getMaxUploadSizeMb(configService: ConfigService): number {
-  const maxUploadSizeMb = Number(
-    configService.get<string>(MAX_UPLOAD_SIZE_MB_KEY) ?? String(DEFAULT_MAX_UPLOAD_SIZE_MB),
-  );
-
-  return Number.isFinite(maxUploadSizeMb) && maxUploadSizeMb > 0
-    ? maxUploadSizeMb
-    : DEFAULT_MAX_UPLOAD_SIZE_MB;
-}
-
-function assertUploadFileSize(file: UploadFileInput, maxSizeMb: number): void {
-  const maxBytes = maxSizeMb * 1024 * 1024;
-
-  if (file.size > maxBytes) {
-    throw new UnprocessableEntityException(`UPLOAD_FILE_TOO_LARGE: max ${maxSizeMb}MB`);
-  }
-}
+import {
+  ALLOWED_MIME_TYPES,
+  assertUploadFileSecurity,
+  assertUploadFileSize,
+  getMaxUploadSizeMb,
+  MAX_UPLOAD_SIZE_MB_KEY,
+} from './upload-security.util';
 
 @ApiTags('materials')
 @ApiBearerAuth()
@@ -68,7 +43,6 @@ function assertUploadFileSize(file: UploadFileInput, maxSizeMb: number): void {
 export class MaterialsController {
   constructor(
     private readonly materialsService: MaterialsService,
-    private readonly configService: ConfigService,
   ) {}
 
   @Get()
@@ -130,6 +104,9 @@ export class MaterialsController {
   })
   @UseInterceptors(
     FileInterceptor('file', {
+      limits: {
+        fileSize: getMaxUploadSizeMb(process.env[MAX_UPLOAD_SIZE_MB_KEY]) * 1024 * 1024,
+      },
       fileFilter: (_req, file, callback) => {
         if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
           callback(new UnprocessableEntityException('UNSUPPORTED_FILE_TYPE'), false);
@@ -150,12 +127,16 @@ export class MaterialsController {
     )
     file: UploadFileInput,
   ): Promise<UploadedMaterial> {
-    assertUploadFileSize(file, getMaxUploadSizeMb(this.configService));
+    const maxUploadSizeMb = getMaxUploadSizeMb(process.env[MAX_UPLOAD_SIZE_MB_KEY]);
+
+    assertUploadFileSize(file, maxUploadSizeMb);
+    const safetyStatus = assertUploadFileSecurity(file);
 
     return this.materialsService.createWithFile({
       uploaderId: req.user.id,
       dto,
       file,
+      safetyStatus,
     });
   }
 }
