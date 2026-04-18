@@ -140,27 +140,31 @@ export class AuthService {
   }
 
   private parseAndVerifyToken(token: string): AccessPayload {
-    const parts = token.split('.');
-    if (parts.length !== 3) {
+    try {
+      const parts = token.split('.');
+      if (parts.length !== 3) {
+        throw new Error('Invalid token format');
+      }
+
+      const [encodedHeader, encodedPayload, signature] = parts;
+      const unsigned = `${encodedHeader}.${encodedPayload}`;
+      const expectedSignature = this.sign(unsigned);
+
+      if (!this.safeEqualText(signature, expectedSignature)) {
+        throw new Error('Invalid token signature');
+      }
+
+      const payloadText = this.base64UrlDecode(encodedPayload);
+      const payload = JSON.parse(payloadText) as Partial<AccessPayload>;
+
+      if (!payload.sub || !payload.email || !payload.username || !payload.role || !payload.exp) {
+        throw new Error('Malformed token payload');
+      }
+
+      return payload as AccessPayload;
+    } catch {
       throw new UnauthorizedException('Invalid token');
     }
-
-    const [encodedHeader, encodedPayload, signature] = parts;
-    const unsigned = `${encodedHeader}.${encodedPayload}`;
-    const expectedSignature = this.sign(unsigned);
-
-    if (!this.safeEqualText(signature, expectedSignature)) {
-      throw new UnauthorizedException('Invalid token signature');
-    }
-
-    const payloadText = this.base64UrlDecode(encodedPayload);
-    const payload = JSON.parse(payloadText) as Partial<AccessPayload>;
-
-    if (!payload.sub || !payload.email || !payload.username || !payload.role || !payload.exp) {
-      throw new UnauthorizedException('Malformed token payload');
-    }
-
-    return payload as AccessPayload;
   }
 
   private sign(input: string): string {
