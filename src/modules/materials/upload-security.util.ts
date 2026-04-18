@@ -5,7 +5,7 @@ import { UploadFileInput } from './file-upload.type';
 export const MAX_UPLOAD_SIZE_MB_KEY = 'MAX_UPLOAD_SIZE_MB';
 export const DEFAULT_MAX_UPLOAD_SIZE_MB = 50;
 
-export type UploadSecurityStatus = 'PASSED';
+export type UploadSecurityStatus = 'QUARANTINED' | 'SCANNING' | 'PASSED' | 'FAILED' | 'TIMEOUT';
 
 type SupportedType = 'pdf' | 'docx' | 'pptx' | 'zip' | 'text';
 
