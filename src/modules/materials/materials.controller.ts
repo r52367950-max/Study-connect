@@ -32,7 +32,6 @@ import { UploadFileInput } from './file-upload.type';
 import { MaterialsService, UploadedMaterial } from './materials.service';
 import {
   ALLOWED_MIME_TYPES,
-  assertUploadFileSecurity,
   assertUploadFileSize,
   getMaxUploadSizeMb,
   MAX_UPLOAD_SIZE_MB_KEY,
@@ -136,13 +135,11 @@ export class MaterialsController {
     const maxUploadSizeMb = getMaxUploadSizeMb(process.env[MAX_UPLOAD_SIZE_MB_KEY]);
 
     assertUploadFileSize(file, maxUploadSizeMb);
-    const safetyStatus = assertUploadFileSecurity(file);
 
     return this.materialsService.createWithFile({
       uploaderId: req.user.id,
       dto,
       file,
-      safetyStatus,
     });
   }
 }

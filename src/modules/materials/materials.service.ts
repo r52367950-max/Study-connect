@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Material, MaterialStatus, MaterialVisibility, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { MinioService, PrismaService } from '../../infra';
@@ -7,7 +7,7 @@ import { CreateRatingDto } from './dto/create-rating.dto';
 import { MaterialRatingsQueryDto } from './dto/material-ratings-query.dto';
 import { MaterialSearchQueryDto, MaterialSort } from './dto/material-search-query.dto';
 import { UploadFileInput } from './file-upload.type';
-import { UploadSecurityStatus } from './upload-security.util';
+import { FileScanService } from './file-scan.service';
 
 export type UploadedMaterial = Pick<
   Material,
@@ -29,16 +29,18 @@ export type UploadedMaterial = Pick<
 
 @Injectable()
 export class MaterialsService {
+  private readonly logger = new Logger(MaterialsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly minioService: MinioService,
+    private readonly fileScanService: FileScanService,
   ) {}
 
   async createWithFile(params: {
     uploaderId: string;
     dto: CreateMaterialDto;
     file: UploadFileInput;
-    safetyStatus?: UploadSecurityStatus;
   }): Promise<UploadedMaterial> {
     const safeName = params.file.originalname.replace(/\s+/g, '-');
     const key = `${new Date().toISOString().slice(0, 10)}/${randomUUID()}-${safeName}`;
@@ -58,7 +60,7 @@ export class MaterialsService {
         status: MaterialStatus.PENDING,
         fileKey: key,
         uploaderId: params.uploaderId,
-        fileSafetyStatus: params.safetyStatus ?? null,
+        fileSafetyStatus: 'QUARANTINED',
       },
       select: {
         id: true,
@@ -77,6 +79,8 @@ export class MaterialsService {
         fileSafetyStatus: true,
       },
     });
+
+    this.fileScanService.enqueueScan(material.id, params.file);
 
     return material;
   }
@@ -366,12 +370,7 @@ export class MaterialsService {
   }
 
   async downloadApprovedMaterial(materialId: string, userId: string) {
-    const material = await this.ensurePublicApprovedMaterial(materialId, {
-      select: {
-        id: true,
-        fileKey: true,
-      },
-    });
+    const material = await this.ensureDownloadablePublicMaterial(materialId);
 
     const download = await this.prisma.download.create({
       data: {
@@ -435,6 +434,33 @@ export class MaterialsService {
     }
 
     return material as Prisma.MaterialGetPayload<{ select: TSelect }>;
+  }
+
+  private async ensureDownloadablePublicMaterial(materialId: string): Promise<{ id: string; fileKey: string }> {
+    const material = await this.ensurePublicApprovedMaterial(materialId, {
+      select: {
+        id: true,
+        fileKey: true,
+        fileSafetyStatus: true,
+      },
+    });
+
+    if (material.fileSafetyStatus !== 'PASSED') {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'SECURITY_ALERT_DOWNLOAD_BLOCKED',
+          materialId,
+          fileSafetyStatus: material.fileSafetyStatus ?? 'NULL',
+          timestamp: new Date().toISOString(),
+        }),
+      );
+      throw new NotFoundException('Material not found');
+    }
+
+    return {
+      id: material.id,
+      fileKey: material.fileKey,
+    };
   }
 
   private buildApprovedWhere(query: MaterialSearchQueryDto): Prisma.MaterialWhereInput {

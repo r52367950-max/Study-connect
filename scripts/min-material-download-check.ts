@@ -28,6 +28,7 @@ type DbMaterial = {
   visibility: 'PUBLIC' | 'PRIVATE';
   status: MaterialStatus;
   reviewComment: string | null;
+  fileSafetyStatus: 'QUARANTINED' | 'SCANNING' | 'PASSED' | 'FAILED' | 'TIMEOUT' | null;
   uploaderId: string;
   createdAt: Date;
   updatedAt: Date;
@@ -160,6 +161,7 @@ class PrismaServiceMock {
         visibility: 'PUBLIC',
         status: 'APPROVED',
         reviewComment: 'ok',
+        fileSafetyStatus: 'PASSED',
         uploaderId,
         createdAt: now,
         updatedAt: now,
@@ -177,6 +179,7 @@ class PrismaServiceMock {
         visibility: 'PRIVATE',
         status: 'APPROVED',
         reviewComment: 'ok',
+        fileSafetyStatus: 'PASSED',
         uploaderId,
         createdAt: now,
         updatedAt: now,
@@ -194,6 +197,7 @@ class PrismaServiceMock {
         visibility: 'PUBLIC',
         status: 'PENDING',
         reviewComment: null,
+        fileSafetyStatus: 'QUARANTINED',
         uploaderId,
         createdAt: now,
         updatedAt: now,
@@ -265,7 +269,7 @@ async function run(): Promise<void> {
   const loginBody = (await loginRes.json()) as { accessToken: string };
 
   const approvedRes = await fetch(`${base}/materials/${seeded.approvedId}/download`, {
-    headers: { authorization: `Bearer ${loginBody.accessToken}` },
+    headers: { cookie: `auth-token=${encodeURIComponent(loginBody.accessToken)}` },
   });
   assert(approvedRes.status === 200, `approved material download should be 200, got ${approvedRes.status}`);
   const approvedBody = (await approvedRes.json()) as { downloadUrl: string; materialId: string };
@@ -276,12 +280,12 @@ async function run(): Promise<void> {
   assert(approvedBody.materialId === seeded.approvedId, 'approved response should keep material id');
 
   const pendingRes = await fetch(`${base}/materials/${seeded.pendingId}/download`, {
-    headers: { authorization: `Bearer ${loginBody.accessToken}` },
+    headers: { cookie: `auth-token=${encodeURIComponent(loginBody.accessToken)}` },
   });
   assert(pendingRes.status === 404, `pending material download should be 404, got ${pendingRes.status}`);
 
   const privateApprovedRes = await fetch(`${base}/materials/${seeded.privateApprovedId}/download`, {
-    headers: { authorization: `Bearer ${loginBody.accessToken}` },
+    headers: { cookie: `auth-token=${encodeURIComponent(loginBody.accessToken)}` },
   });
   assert(
     privateApprovedRes.status === 404,
