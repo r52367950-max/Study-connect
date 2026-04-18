@@ -38,10 +38,11 @@ export class AuthController {
   @ApiOperation({ summary: 'Login and set JWT access token in HttpOnly cookie' })
   @ApiOkResponse({ type: AuthResponseDto })
   async login(
+    @Req() req: Request,
     @Body() dto: LoginDto,
     @Res({ passthrough: true }) response: Response,
   ): Promise<AuthResponseDto> {
-    const authResult = await this.authService.login(dto);
+    const authResult = await this.authService.login(dto, req.ip);
     this.setAuthCookie(response, authResult.accessToken);
     return { user: authResult.user };
   }
