@@ -1,0 +1,54 @@
+name: Security Gate
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'docs/security-gate-policy.md'
+      - '.github/workflows/security-gate.yml'
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'docs/security-gate-policy.md'
+      - '.github/workflows/security-gate.yml'
+
+jobs:
+  rate-limit-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Collect 429 evidence (login/upload/admin)
+        run: |
+          mkdir -p artifacts
+          npm run test:min-rate-limit | tee artifacts/rate-limit-429-evidence.log
+
+      - name: Assert evidence lines
+        run: |
+          grep -F "login 429 check passed: 429" artifacts/rate-limit-429-evidence.log
+          grep -F "upload 429 check passed: 429" artifacts/rate-limit-429-evidence.log
+          grep -F "admin 429 check passed: 429" artifacts/rate-limit-429-evidence.log
+          grep -F "rate_limit_blocked log assertion passed: login/upload/admin" artifacts/rate-limit-429-evidence.log
+
+      - name: Upload evidence artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rate-limit-429-evidence
+          path: artifacts/rate-limit-429-evidence.log
+          if-no-files-found: error
