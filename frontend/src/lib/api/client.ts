@@ -7,6 +7,61 @@ export const apiClient = axios.create({
   withCredentials: true,
 })
 
+const CSRF_COOKIE_NAME = 'csrf-token'
+const CSRF_HEADER_NAME = 'x-csrf-token'
+const STATE_CHANGING_METHODS = new Set(['post', 'put', 'patch', 'delete'])
+let csrfBootstrapPromise: Promise<string> | null = null
+
+function getCsrfTokenFromCookie(): string | null {
+  if (typeof document === 'undefined') return null
+  const cookies = document.cookie ? document.cookie.split(';') : []
+  for (const item of cookies) {
+    const [rawName, ...rawValue] = item.trim().split('=')
+    if (rawName === CSRF_COOKIE_NAME && rawValue.length > 0) {
+      return decodeURIComponent(rawValue.join('='))
+    }
+  }
+  return null
+}
+
+async function ensureCsrfToken(): Promise<string> {
+  const cookieToken = getCsrfTokenFromCookie()
+  if (cookieToken) {
+    return cookieToken
+  }
+
+  if (!csrfBootstrapPromise) {
+    csrfBootstrapPromise = apiClient
+      .get<{ csrfToken: string }>('/auth/csrf')
+      .then((response) => response.data.csrfToken)
+      .finally(() => {
+        csrfBootstrapPromise = null
+      })
+  }
+
+  return csrfBootstrapPromise
+}
+
+apiClient.interceptors.request.use(async (config) => {
+  const method = (config.method ?? 'get').toLowerCase()
+  const requestUrl = config.url ?? ''
+
+  if (!STATE_CHANGING_METHODS.has(method) || requestUrl === '/auth/csrf') {
+    return config
+  }
+
+  const token = await ensureCsrfToken()
+  if (typeof config.headers?.set === 'function') {
+    config.headers.set(CSRF_HEADER_NAME, token)
+  } else {
+    config.headers = {
+      ...(config.headers ?? {}),
+      [CSRF_HEADER_NAME]: token,
+    }
+  }
+  return config
+})
+
 // ─── 403 handler (exported for unit testing) ─────────────────────────────────
 /**
  * Handles a 403 response based on which endpoint was called.

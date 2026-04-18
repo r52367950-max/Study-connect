@@ -5,25 +5,11 @@ import { Request, Response, NextFunction } from 'express';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { AppModule } from './app.module';
 
-function applySecurityHeaders(
-  request: Request,
-  response: Response,
-  next: NextFunction,
-): void {
-  response.setHeader(
-    'Content-Security-Policy',
-    "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none';",
-  );
-  response.setHeader('X-Content-Type-Options', 'nosniff');
-  response.setHeader('Referrer-Policy', 'no-referrer');
-  response.setHeader('X-Frame-Options', 'DENY');
-  response.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-
-  if (request.secure) {
-    response.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  }
-
-  next();
+function parseAllowedCorsOrigins(): string[] {
+  return (process.env.CORS_ORIGIN ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
 }
 
 async function bootstrap() {
@@ -42,9 +28,30 @@ async function bootstrap() {
     }),
   );
 
+  const allowedOrigins = parseAllowedCorsOrigins();
+  const isProduction = process.env.NODE_ENV === 'production';
+  if (isProduction && allowedOrigins.length === 0) {
+    throw new Error('CORS_ORIGIN must be explicitly configured in production');
+  }
+
+  const corsOriginDelegate = (
+    origin: string | undefined,
+    callback: (error: Error | null, allow?: boolean) => void,
+  ): void => {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      callback(null, allowedOrigins.includes(origin));
+    };
+
   app.enableCors({
-    origin: process.env.CORS_ORIGIN?.split(',').map((origin) => origin.trim()) ?? true,
+    origin: corsOriginDelegate,
     credentials: true,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
+    optionsSuccessStatus: 204,
   });
 
   if (!isProduction) {
