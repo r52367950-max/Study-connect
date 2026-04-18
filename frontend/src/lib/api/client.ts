@@ -12,6 +12,18 @@ const CSRF_HEADER_NAME = 'x-csrf-token'
 const STATE_CHANGING_METHODS = new Set(['post', 'put', 'patch', 'delete'])
 let csrfBootstrapPromise: Promise<string> | null = null
 
+function isCsrfBootstrapRequest(requestUrl: string): boolean {
+  if (!requestUrl) return false
+  if (requestUrl === '/auth/csrf') return true
+
+  try {
+    const parsedUrl = new URL(requestUrl, apiClient.defaults.baseURL)
+    return parsedUrl.pathname === '/auth/csrf'
+  } catch {
+    return false
+  }
+}
+
 function getCsrfTokenFromCookie(): string | null {
   if (typeof document === 'undefined') return null
   const cookies = document.cookie ? document.cookie.split(';') : []
@@ -46,7 +58,7 @@ apiClient.interceptors.request.use(async (config) => {
   const method = (config.method ?? 'get').toLowerCase()
   const requestUrl = config.url ?? ''
 
-  if (!STATE_CHANGING_METHODS.has(method) || requestUrl === '/auth/csrf') {
+  if (!STATE_CHANGING_METHODS.has(method) || isCsrfBootstrapRequest(requestUrl)) {
     return config
   }
 

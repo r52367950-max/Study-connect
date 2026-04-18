@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CsrfService } from '../../common/security/csrf.service';
 import { RateLimitModule } from '../../common/rate-limit.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';

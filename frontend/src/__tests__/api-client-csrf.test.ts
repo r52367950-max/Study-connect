@@ -41,4 +41,31 @@ describe('api client csrf interceptor', () => {
 
     expect(csrfHeader).toBe('test-csrf-token')
   })
+
+  it('does not recurse csrf bootstrap when request url is absolute', async () => {
+    Object.defineProperty(globalThis, 'document', {
+      value: { cookie: '' },
+      configurable: true,
+      writable: true,
+    })
+
+    const adapter = vi.fn(async (config) => ({
+      data: { csrfToken: 'bootstrapped-token' },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config,
+    }))
+    apiClient.defaults.adapter = adapter
+
+    await apiClient.post('http://localhost:3000/auth/csrf')
+
+    const requestConfig = adapter.mock.calls[0]?.[0]
+    const csrfHeader =
+      typeof requestConfig.headers?.get === 'function'
+        ? requestConfig.headers.get('x-csrf-token')
+        : requestConfig.headers?.['x-csrf-token']
+
+    expect(csrfHeader).toBeUndefined()
+  })
 })
