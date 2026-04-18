@@ -59,4 +59,10 @@ export class AdminController {
   reject(@Param('id') id: string, @Body() dto: RejectMaterialDto, @Req() req: Request) {
     return this.adminService.rejectMaterial(id, dto.reason, req.user.id);
   }
+
+  @Post('users/:id/ban')
+  @ApiOperation({ summary: 'Ban one user and invalidate active tokens immediately' })
+  banUser(@Param('id') id: string) {
+    return this.adminService.banUser(id);
+  }
 }
