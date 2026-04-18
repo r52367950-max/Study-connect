@@ -224,6 +224,7 @@ class MinioServiceMock {
 
 async function run(): Promise<void> {
   process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'task6-secret';
+  process.env.CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://frontend.local:3000';
 
   const prismaMock = new PrismaServiceMock();
 
@@ -244,32 +245,84 @@ async function run(): Promise<void> {
   const address = app.getHttpServer().address();
   const port = typeof address === 'string' ? 3000 : address.port;
   const base = `http://127.0.0.1:${port}`;
+  const allowedOrigin = 'http://frontend.local:3000';
 
+  function getCookiePair(setCookieHeader: string): string {
+    return setCookieHeader.split(';')[0] ?? '';
+  }
+
+  function getSetCookieHeaders(response: Response): string[] {
+    const withGetSetCookie = response.headers as Headers & { getSetCookie?: () => string[] };
+    if (typeof withGetSetCookie.getSetCookie === 'function') {
+      return withGetSetCookie.getSetCookie();
+    }
+
+    const raw = response.headers.get('set-cookie');
+    return raw ? [raw] : [];
+  }
+
+  function findCookiePair(response: Response, cookieName: string): string {
+    const targetPrefix = `${cookieName}=`;
+    const matched = getSetCookieHeaders(response)
+      .map((cookieLine) => getCookiePair(cookieLine))
+      .find((cookiePair) => cookiePair.startsWith(targetPrefix));
+
+    return matched ?? '';
+  }
+
+  async function issueCsrfCookie(existingCookies = ''): Promise<{ token: string; cookiePair: string }> {
+    const csrfRes = await fetch(`${base}/auth/csrf`, {
+      headers: {
+        origin: allowedOrigin,
+        ...(existingCookies ? { cookie: existingCookies } : {}),
+      },
+    });
+    const csrfBody = (await csrfRes.json()) as { csrfToken: string };
+    return {
+      token: csrfBody.csrfToken,
+      cookiePair: findCookiePair(csrfRes, 'csrf-token'),
+    };
+  }
+
+  const registerCsrf = await issueCsrfCookie();
   const registerRes = await fetch(`${base}/auth/register`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      origin: allowedOrigin,
+      cookie: registerCsrf.cookiePair,
+      'x-csrf-token': registerCsrf.token,
+    },
     body: JSON.stringify({
       email: 'downloader@example.com',
       username: 'downloader',
       password: 'StrongPass123!',
     }),
   });
-  const registered = (await registerRes.json()) as { id: string };
+  const registered = (await registerRes.json()) as { user: { id: string } };
 
-  const seeded = prismaMock.seedMaterials(registered.id);
+  const seeded = prismaMock.seedMaterials(registered.user.id);
 
   const guestDownload = await fetch(`${base}/materials/${seeded.approvedId}/download`);
   assert(guestDownload.status === 401, `guest download should be 401, got ${guestDownload.status}`);
 
+  const loginCsrf = await issueCsrfCookie();
   const loginRes = await fetch(`${base}/auth/login`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      origin: allowedOrigin,
+      cookie: loginCsrf.cookiePair,
+      'x-csrf-token': loginCsrf.token,
+    },
     body: JSON.stringify({ email: 'downloader@example.com', password: 'StrongPass123!' }),
   });
-  const loginBody = (await loginRes.json()) as { accessToken: string };
+  const authCookie = findCookiePair(loginRes, 'auth-token');
+  assert(loginRes.status === 200, `login should be 200, got ${loginRes.status}`);
+  assert(authCookie.length > 0, 'login should set auth-token cookie');
 
   const approvedRes = await fetch(`${base}/materials/${seeded.approvedId}/download`, {
-    headers: { cookie: `auth-token=${encodeURIComponent(loginBody.accessToken)}` },
+    headers: { cookie: authCookie },
   });
   assert(approvedRes.status === 200, `approved material download should be 200, got ${approvedRes.status}`);
   const approvedBody = (await approvedRes.json()) as { downloadUrl: string; materialId: string };
@@ -280,12 +333,12 @@ async function run(): Promise<void> {
   assert(approvedBody.materialId === seeded.approvedId, 'approved response should keep material id');
 
   const pendingRes = await fetch(`${base}/materials/${seeded.pendingId}/download`, {
-    headers: { cookie: `auth-token=${encodeURIComponent(loginBody.accessToken)}` },
+    headers: { cookie: authCookie },
   });
   assert(pendingRes.status === 404, `pending material download should be 404, got ${pendingRes.status}`);
 
   const privateApprovedRes = await fetch(`${base}/materials/${seeded.privateApprovedId}/download`, {
-    headers: { cookie: `auth-token=${encodeURIComponent(loginBody.accessToken)}` },
+    headers: { cookie: authCookie },
   });
   assert(
     privateApprovedRes.status === 404,
