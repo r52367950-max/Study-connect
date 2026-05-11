@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsEnum, IsOptional, IsString, Length, Matches, ValidateIf } from 'class-validator';
+import { IsEmail, IsEnum, IsString, Length, Matches, ValidateIf } from 'class-validator';
 import { OtpPurpose } from '@prisma/client';
 import { OtpChannelDto } from './send-otp.dto';
 
@@ -12,13 +12,11 @@ export class VerifyOtpDto {
   @ValidateIf((dto: VerifyOtpDto) => dto.channel === OtpChannelDto.SMS)
   @IsString()
   @Matches(/^[+\d][\d\s-]{6,19}$/)
-  @IsOptional()
   phone?: string;
 
   @ApiProperty({ example: 'student@example.com', required: false })
   @ValidateIf((dto: VerifyOtpDto) => dto.channel === OtpChannelDto.EMAIL)
   @IsEmail()
-  @IsOptional()
   email?: string;
 
   @ApiProperty({ enum: OtpPurpose })

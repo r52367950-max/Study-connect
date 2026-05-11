@@ -16,7 +16,6 @@ export class ConsoleMailProvider implements MailProvider {
 
 export class SmtpMailProvider implements MailProvider {
   readonly name = 'smtp';
-  private readonly logger = new Logger(SmtpMailProvider.name);
 
   constructor(
     private readonly host: string,
@@ -38,8 +37,7 @@ export class SmtpMailProvider implements MailProvider {
     };
     const nodemailer = optionalRequire('nodemailer');
     if (!nodemailer) {
-      this.logger.warn('nodemailer not installed; cannot dispatch email OTP');
-      return;
+      throw new Error('SmtpMailProvider is configured but nodemailer is not installed (run: npm i nodemailer)');
     }
     const transport = (nodemailer as any).createTransport({
       host: this.host,

@@ -16,7 +16,6 @@ export class ConsoleSmsProvider implements SmsProvider {
 
 export class AliyunSmsProvider implements SmsProvider {
   readonly name = 'aliyun';
-  private readonly logger = new Logger(AliyunSmsProvider.name);
 
   constructor(
     private readonly accessKeyId: string,
@@ -40,16 +39,14 @@ export class AliyunSmsProvider implements SmsProvider {
     };
     const sdk = optionalRequire('@alicloud/dysmsapi20170525');
     if (!sdk) {
-      this.logger.warn(
-        'AliyunSmsProvider configured but @alicloud/dysmsapi20170525 is not installed; falling back to no-op',
+      throw new Error(
+        'AliyunSmsProvider is configured but @alicloud/dysmsapi20170525 is not installed (run: npm i @alicloud/dysmsapi20170525 @alicloud/openapi-client)',
       );
-      return;
     }
 
     const openApi = optionalRequire('@alicloud/openapi-client');
     if (!openApi) {
-      this.logger.warn('@alicloud/openapi-client missing; cannot dispatch SMS');
-      return;
+      throw new Error('AliyunSmsProvider is configured but @alicloud/openapi-client is not installed');
     }
 
     const ClientCtor = (sdk as { default?: { default?: unknown }; default_?: unknown }).default;

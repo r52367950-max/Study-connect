@@ -22,11 +22,15 @@ const TTL_MS = 5 * 60_000;
 const IP_WINDOW_MS = 60_000;
 const IP_MAX = 5;
 const CODE_LENGTH = 6;
+// Cap failed verification attempts so a 6-digit code (1e6 space) cannot be
+// brute-forced within its TTL. Window is the same as the code TTL.
+const VERIFY_MAX_ATTEMPTS = 5;
 
 @Injectable()
 export class OtpService {
   private readonly logger = new Logger(OtpService.name);
   private readonly ipBuckets = new Map<string, { count: number; resetAt: number }>();
+  private readonly verifyAttempts = new Map<string, { count: number; resetAt: number }>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -94,6 +98,9 @@ export class OtpService {
       return;
     }
 
+    const verifyKey = `${input.channel}:${input.identifier}:${input.purpose}`;
+    this.assertVerifyAttemptsRemaining(verifyKey);
+
     const now = new Date();
     const attempt = await this.prisma.otpAttempt.findFirst({
       where: {
@@ -107,13 +114,35 @@ export class OtpService {
     });
 
     if (!attempt || !this.codesEqual(attempt.codeHash, input.code)) {
+      this.recordVerifyFailure(verifyKey);
       throw new UnauthorizedException('Invalid or expired OTP');
     }
 
+    this.verifyAttempts.delete(verifyKey);
     await this.prisma.otpAttempt.update({
       where: { id: attempt.id },
       data: { consumedAt: now },
     });
+  }
+
+  private assertVerifyAttemptsRemaining(key: string): void {
+    const bucket = this.verifyAttempts.get(key);
+    if (bucket && bucket.resetAt > Date.now() && bucket.count >= VERIFY_MAX_ATTEMPTS) {
+      throw new HttpException(
+        'Too many incorrect codes; request a new one',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  private recordVerifyFailure(key: string): void {
+    const now = Date.now();
+    const bucket = this.verifyAttempts.get(key);
+    if (!bucket || bucket.resetAt <= now) {
+      this.verifyAttempts.set(key, { count: 1, resetAt: now + TTL_MS });
+      return;
+    }
+    bucket.count += 1;
   }
 
   private async enforceResendCooldown(identifier: string, purpose: OtpPurpose): Promise<void> {

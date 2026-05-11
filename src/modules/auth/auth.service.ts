@@ -113,8 +113,10 @@ export class AuthService {
     }
 
     const identifier = (dto.email ?? dto.phone)!.toLowerCase();
-    const lockKey = dto.email ? `login-email:${identifier}` : `login-phone:${identifier}`;
-    const lock = this.rateLimitService.checkLoginLock(lockKey);
+    // RateLimitService namespaces login locks under `login-email:<id>`; reuse it
+    // for phone too. Email identifiers contain '@' and phone identifiers are
+    // digits, so they never collide in the same bucket.
+    const lock = this.rateLimitService.checkLoginLock(`login-email:${identifier}`);
     if (lock.locked) {
       throw new HttpException(
         `Too many login failures, retry in ${Math.ceil(lock.retryAfterMs / 1000)}s`,
@@ -136,13 +138,13 @@ export class AuthService {
     const userStatus = user?.status ?? UserStatus.ACTIVE;
     if (!user || userStatus === UserStatus.BANNED) {
       // Avoid leaking which side failed; record + throw same error
-      this.recordLoginFailure(lockKey, identifier, ipAddress);
+      this.recordLoginFailure(identifier, ipAddress);
       throw new UnauthorizedException('Invalid credentials');
     }
 
     if (dto.password) {
       if (!this.verifyPassword(dto.password, user.passwordHash)) {
-        this.recordLoginFailure(lockKey, identifier, ipAddress);
+        this.recordLoginFailure(identifier, ipAddress);
         throw new UnauthorizedException('Invalid credentials');
       }
     } else {
@@ -155,7 +157,7 @@ export class AuthService {
           code: dto.otpCode!,
         });
       } catch (err) {
-        this.recordLoginFailure(lockKey, identifier, ipAddress);
+        this.recordLoginFailure(identifier, ipAddress);
         throw err;
       }
     }
@@ -280,7 +282,7 @@ export class AuthService {
     });
   }
 
-  private recordLoginFailure(lockKey: string, identifier: string, ip: string): void {
+  private recordLoginFailure(identifier: string, ip: string): void {
     this.rateLimitService.recordLoginFailure({
       email: identifier,
       ip,
@@ -288,17 +290,6 @@ export class AuthService {
       maxFailures: this.getNumber('RATE_LIMIT_LOGIN_MAX_FAILURES', 5),
       lockMs: this.getNumber('RATE_LIMIT_LOGIN_LOCK_MS', 5 * 60_000),
     });
-    // The legacy rateLimitService keys off `email`; add a phone-scoped lock too
-    // so phone-based brute force gets its own bucket.
-    if (lockKey.startsWith('login-phone:')) {
-      this.rateLimitService.recordLoginFailure({
-        email: lockKey,
-        ip,
-        failureWindowMs: this.getNumber('RATE_LIMIT_LOGIN_FAILURE_WINDOW_MS', 60_000),
-        maxFailures: this.getNumber('RATE_LIMIT_LOGIN_MAX_FAILURES', 5),
-        lockMs: this.getNumber('RATE_LIMIT_LOGIN_LOCK_MS', 5 * 60_000),
-      });
-    }
   }
 
   private hashPassword(password: string): string {

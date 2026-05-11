@@ -56,9 +56,21 @@ export class UsersService {
 
     const existing = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { onboardedAt: true },
+      select: {
+        onboardedAt: true,
+        profileRole: true,
+        displayName: true,
+        city: true,
+        schoolId: true,
+        stages: true,
+        grades: true,
+        subjects: true,
+      },
     });
-    if (existing && !existing.onboardedAt && this.isOnboardingComplete(dto)) {
+    if (!existing) {
+      throw new NotFoundException('User not found');
+    }
+    if (!existing.onboardedAt && this.isOnboardingComplete(existing, dto)) {
       data.onboardedAt = new Date();
     }
 
@@ -85,11 +97,29 @@ export class UsersService {
     checkAll('viewedKind', dto.viewedKinds, VIEWED_KINDS);
   }
 
-  private isOnboardingComplete(dto: UpdateProfileDto): boolean {
+  private isOnboardingComplete(
+    existing: {
+      profileRole: unknown;
+      displayName: string | null;
+      city: string | null;
+      schoolId: string | null;
+      stages: string[];
+      grades: string[];
+      subjects: string[];
+    },
+    dto: UpdateProfileDto,
+  ): boolean {
+    const profileRole = dto.profileRole ?? existing.profileRole;
+    const displayName = dto.displayName ?? existing.displayName;
+    const city = dto.city ?? existing.city;
+    const schoolId = dto.schoolId ?? existing.schoolId;
+    const stages = dto.stages ?? existing.stages;
+    const grades = dto.grades ?? existing.grades;
+    const subjects = dto.subjects ?? existing.subjects;
     return Boolean(
-      dto.profileRole && dto.displayName && (dto.city || dto.schoolId) &&
-        dto.subjects && dto.subjects.length > 0 &&
-        ((dto.stages && dto.stages.length > 0) || (dto.grades && dto.grades.length > 0)),
+      profileRole && displayName && (city || schoolId) &&
+        subjects.length > 0 &&
+        (stages.length > 0 || grades.length > 0),
     );
   }
 }
