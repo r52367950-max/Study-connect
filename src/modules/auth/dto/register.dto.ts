@@ -1,10 +1,33 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsOptional,
+  IsString,
+  Length,
+  Matches,
+  MaxLength,
+  MinLength,
+  ValidateIf,
+} from 'class-validator';
 
+/**
+ * Register with either email or phone (one is required).
+ * `otpCode` must come from a prior `/auth/otp/send` cycle with purpose=REGISTER
+ * matching the identifier being registered.
+ */
 export class RegisterDto {
-  @ApiProperty({ example: 'student@example.com' })
+  @ApiProperty({ example: 'student@example.com', required: false })
+  @ValidateIf((dto: RegisterDto) => !dto.phone)
   @IsEmail()
-  email!: string;
+  @IsOptional()
+  email?: string;
+
+  @ApiProperty({ example: '13800000000', required: false })
+  @ValidateIf((dto: RegisterDto) => !dto.email)
+  @IsString()
+  @Matches(/^[+\d][\d\s-]{6,19}$/, { message: 'invalid phone format' })
+  @IsOptional()
+  phone?: string;
 
   @ApiProperty({ example: 'alice' })
   @IsString()
@@ -17,4 +40,9 @@ export class RegisterDto {
   @MinLength(8)
   @MaxLength(64)
   password!: string;
+
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @Length(6, 6)
+  otpCode!: string;
 }

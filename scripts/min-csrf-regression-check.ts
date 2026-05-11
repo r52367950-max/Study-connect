@@ -26,14 +26,17 @@ const CONTROLLER_FILES = [
 ] as const;
 
 const EXPECTED_WRITE_ROUTES = [
-  'POST /auth/register',
+  'POST /auth/change-password',
   'POST /auth/login',
   'POST /auth/logout',
-  'POST /materials/:id/ratings',
+  'POST /auth/refresh',
+  'POST /auth/register',
   'POST /materials',
+  'POST /materials/:id/ratings',
   'POST /admin/materials/:id/approve',
   'POST /admin/materials/:id/offline',
   'POST /admin/materials/:id/reject',
+  'POST /admin/users/:id/ban',
 ] as const;
 
 const WRITE_ROUTE_CASES: WriteRouteCase[] = [
@@ -43,7 +46,7 @@ const WRITE_ROUTE_CASES: WriteRouteCase[] = [
     resolvedPath: '/auth/register',
     init: {
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email: 'a@a.com', username: 'a', password: 'Aa123456!' }),
+      body: JSON.stringify({ email: 'a@a.com', username: 'a', password: 'Aa123456!', otpCode: '000000' }),
     },
   },
   {
@@ -57,8 +60,22 @@ const WRITE_ROUTE_CASES: WriteRouteCase[] = [
   },
   {
     method: 'POST',
+    templatePath: '/auth/refresh',
+    resolvedPath: '/auth/refresh',
+  },
+  {
+    method: 'POST',
     templatePath: '/auth/logout',
     resolvedPath: '/auth/logout',
+  },
+  {
+    method: 'POST',
+    templatePath: '/auth/change-password',
+    resolvedPath: '/auth/change-password',
+    init: {
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ currentPassword: 'Aa123456!', newPassword: 'Bb234567!' }),
+    },
   },
   {
     method: 'POST',
@@ -95,6 +112,15 @@ const WRITE_ROUTE_CASES: WriteRouteCase[] = [
     init: {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ reason: 'invalid' }),
+    },
+  },
+  {
+    method: 'POST',
+    templatePath: '/admin/users/:id/ban',
+    resolvedPath: '/admin/users/u-1/ban',
+    init: {
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reason: 'spam' }),
     },
   },
 ];
@@ -199,6 +225,8 @@ function assertAppGuardOrder(): void {
 
 async function run(): Promise<void> {
   process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'test-secret';
+
+  process.env.AUTH_OTP_TEST_BYPASS = process.env.AUTH_OTP_TEST_BYPASS ?? 'true';
   process.env.CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://frontend.local:3000';
 
   assertAppGuardOrder();

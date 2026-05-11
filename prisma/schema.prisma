@@ -29,23 +29,82 @@ enum MaterialStatus {
   OFFLINE
 }
 
+enum ProfileRole {
+  TEACHER
+  STUDENT
+}
+
+enum MaterialKind {
+  EXERCISE
+  HANDOUT
+  EXAM
+  MOCK
+}
+
+enum OtpChannel {
+  SMS
+  EMAIL
+}
+
+enum OtpPurpose {
+  REGISTER
+  LOGIN
+  RESET
+}
+
 model User {
   id           String     @id @default(uuid()) @db.Uuid
-  email        String     @unique
+  email        String?    @unique
+  phone        String?    @unique
   username     String     @unique
   passwordHash String     @map("password_hash")
   role         UserRole   @default(USER)
   status       UserStatus @default(ACTIVE)
   tokenVersion Int        @default(0) @map("token_version")
   avatarUrl    String?    @map("avatar_url")
+
+  profileRole          ProfileRole? @map("profile_role")
+  displayName          String?      @map("display_name")
+  schoolId             String?      @map("school_id") @db.Uuid
+  schoolNameFreeText   String?      @map("school_name_free_text")
+  city                 String?
+  stages               String[]     @default([])
+  grades               String[]     @default([])
+  subjects             String[]     @default([])
+  viewedKinds          String[]     @default([]) @map("viewed_kinds")
+  collaborativeOptIn   Boolean      @default(true) @map("collaborative_opt_in")
+  onboardedAt          DateTime?    @map("onboarded_at")
+  gradesUpdatedAt      DateTime?    @map("grades_updated_at")
+
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
 
+  school       School?    @relation(fields: [schoolId], references: [id], onDelete: SetNull)
   materials    Material[]
   ratings      Rating[]
   downloads    Download[]
+  favorites    Favorite[]
+  viewEvents   ViewEvent[]
 
+  @@index([phone])
+  @@index([email])
+  @@index([schoolId])
   @@map("users")
+}
+
+model School {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  city      String
+  pinyin    String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  users     User[]
+
+  @@unique([city, name])
+  @@index([city, name])
+  @@index([pinyin])
+  @@map("schools")
 }
 
 model Material {
@@ -55,6 +114,7 @@ model Material {
   stage         String?
   grade         String?
   subject       String?
+  kind          MaterialKind?
   year          Int?
   region        String?
   fileKey       String             @map("file_key")
@@ -69,6 +129,8 @@ model Material {
   uploader      User               @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
   ratings       Rating[]
   downloads     Download[]
+  favorites     Favorite[]
+  viewEvents    ViewEvent[]
 
   @@index([uploaderId])
   @@index([status, createdAt])
@@ -76,6 +138,7 @@ model Material {
   @@index([status, stage, grade])
   @@index([status, year])
   @@index([status, region])
+  @@index([status, kind])
   @@map("materials")
 }
 
@@ -109,4 +172,50 @@ model Download {
   @@index([userId])
   @@index([materialId])
   @@map("downloads")
+}
+
+model Favorite {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  materialId String   @map("material_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  material   Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, materialId])
+  @@index([userId, createdAt])
+  @@index([materialId])
+  @@map("favorites")
+}
+
+model ViewEvent {
+  id         String       @id @default(uuid()) @db.Uuid
+  userId     String       @map("user_id") @db.Uuid
+  materialId String       @map("material_id") @db.Uuid
+  kind       MaterialKind?
+  dwellMs    Int          @default(0) @map("dwell_ms")
+  createdAt  DateTime     @default(now()) @map("created_at")
+
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  material   Material     @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([materialId])
+  @@map("view_events")
+}
+
+model OtpAttempt {
+  id         String     @id @default(uuid()) @db.Uuid
+  identifier String
+  channel    OtpChannel
+  purpose    OtpPurpose
+  codeHash   String     @map("code_hash")
+  expiresAt  DateTime   @map("expires_at")
+  consumedAt DateTime?  @map("consumed_at")
+  ip         String?
+  createdAt  DateTime   @default(now()) @map("created_at")
+
+  @@index([identifier, purpose, createdAt])
+  @@map("otp_attempts")
 }

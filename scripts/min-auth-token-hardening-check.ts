@@ -47,8 +47,11 @@ class PrismaServiceMock {
       };
     },
 
-    findUnique: async ({ where }: { where: { email: string } }) => {
-      return this.users.find((user) => user.email === where.email) ?? null;
+    findUnique: async ({ where }: { where: { email?: string; id?: string } }) => {
+      return this.users.find((user) =>
+        (where.email !== undefined && user.email === where.email) ||
+        (where.id !== undefined && user.id === where.id),
+      ) ?? null;
     },
   };
 
@@ -73,6 +76,8 @@ function extractAuthToken(cookie: string): string {
 
 async function run(): Promise<void> {
   process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'test-secret';
+
+  process.env.AUTH_OTP_TEST_BYPASS = process.env.AUTH_OTP_TEST_BYPASS ?? 'true';
   process.env.CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://frontend.local:3000';
 
   const prismaMock = new PrismaServiceMock();
@@ -127,6 +132,7 @@ async function run(): Promise<void> {
       email: 'student@example.com',
       username: 'student',
       password: 'StrongPass123!',
+      otpCode: '000000',
     }),
   });
   if (registerRes.status !== 201) {
@@ -145,8 +151,8 @@ async function run(): Promise<void> {
     },
     body: JSON.stringify({ email: 'student@example.com', password: 'StrongPass123!' }),
   });
-  if (loginRes.status !== 201) {
-    throw new Error(`login expected 201, got ${loginRes.status}`);
+  if (loginRes.status !== 200) {
+    throw new Error(`login expected 200, got ${loginRes.status}`);
   }
 
   const setCookie = loginRes.headers.get('set-cookie') ?? '';

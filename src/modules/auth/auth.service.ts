@@ -7,19 +7,23 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { User, UserRole, UserStatus } from '@prisma/client';
+import { OtpChannel, OtpPurpose, User, UserRole, UserStatus } from '@prisma/client';
 import { randomBytes, scryptSync, timingSafeEqual, createHmac } from 'crypto';
 import { PrismaService } from '../../infra';
 import { RateLimitService } from '../../common/rate-limit.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { OtpService } from './otp/otp.service';
 
-export type AuthUser = Pick<User, 'id' | 'email' | 'username' | 'role'>;
+export type AuthUser = Pick<User, 'id' | 'email' | 'username' | 'role'> & {
+  phone: string | null;
+};
 
 type AccessPayload = {
   type: 'access';
   sub: string;
-  email: string;
+  email: string | null;
+  phone: string | null;
   username: string;
   role: UserRole;
   ver: number;
@@ -39,24 +43,47 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly rateLimitService: RateLimitService,
+    private readonly otpService: OtpService,
   ) {}
 
   async register(dto: RegisterDto): Promise<{ accessToken: string; refreshToken: string; user: AuthUser }> {
+    if (!dto.email && !dto.phone) {
+      throw new BadRequestException('Email or phone is required');
+    }
+    if (dto.email && dto.phone) {
+      throw new BadRequestException('Provide either email or phone, not both');
+    }
+
+    const channel = dto.email ? OtpChannel.EMAIL : OtpChannel.SMS;
+    const identifier = (dto.email ?? dto.phone)!.toLowerCase();
+
+    await this.otpService.consume({
+      channel,
+      identifier,
+      purpose: OtpPurpose.REGISTER,
+      code: dto.otpCode,
+    });
+
     const existing = await this.prisma.user.findFirst({
       where: {
-        OR: [{ email: dto.email }, { username: dto.username }],
+        OR: [
+          dto.email ? { email: identifier } : undefined,
+          dto.phone ? { phone: identifier } : undefined,
+          { username: dto.username },
+        ].filter(Boolean) as object[],
       },
     });
 
     if (existing) {
-      throw new BadRequestException('Email or username already exists');
+      throw new BadRequestException('Identifier or username already exists');
     }
 
     const passwordHash = this.hashPassword(dto.password);
 
     const user = await this.prisma.user.create({
       data: {
-        email: dto.email,
+        email: dto.email ? identifier : null,
+        phone: dto.phone ? identifier : null,
         username: dto.username,
         passwordHash,
         role: UserRole.USER,
@@ -64,6 +91,7 @@ export class AuthService {
       select: {
         id: true,
         email: true,
+        phone: true,
         username: true,
         role: true,
       },
@@ -77,8 +105,18 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, ipAddress = 'unknown'): Promise<{ accessToken: string; refreshToken: string; user: AuthUser }> {
-    const email = dto.email.toLowerCase();
-    const lock = this.rateLimitService.checkLoginLock(`login-email:${email}`);
+    if (!dto.email && !dto.phone) {
+      throw new BadRequestException('Email or phone is required');
+    }
+    if (!dto.password && !dto.otpCode) {
+      throw new BadRequestException('Password or OTP code is required');
+    }
+
+    const identifier = (dto.email ?? dto.phone)!.toLowerCase();
+    // RateLimitService namespaces login locks under `login-email:<id>`; reuse it
+    // for phone too. Email identifiers contain '@' and phone identifiers are
+    // digits, so they never collide in the same bucket.
+    const lock = this.rateLimitService.checkLoginLock(`login-email:${identifier}`);
     if (lock.locked) {
       throw new HttpException(
         `Too many login failures, retry in ${Math.ceil(lock.retryAfterMs / 1000)}s`,
@@ -86,27 +124,50 @@ export class AuthService {
       );
     }
 
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email },
+    // Wrap in OR so legacy PrismaServiceMock implementations (which only know
+    // the OR signature from the original email/username register flow) keep
+    // working. A single-key {email} or {phone} predicate would crash them.
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          dto.email ? { email: identifier } : { phone: identifier },
+        ],
+      },
     });
 
-    const userStatus = user && 'status' in user ? user.status : UserStatus.ACTIVE;
-    if (!user || userStatus === UserStatus.BANNED || !this.verifyPassword(dto.password, user.passwordHash)) {
-      this.rateLimitService.recordLoginFailure({
-        email,
-        ip: ipAddress,
-        failureWindowMs: this.getNumber('RATE_LIMIT_LOGIN_FAILURE_WINDOW_MS', 60_000),
-        maxFailures: this.getNumber('RATE_LIMIT_LOGIN_MAX_FAILURES', 5),
-        lockMs: this.getNumber('RATE_LIMIT_LOGIN_LOCK_MS', 5 * 60_000),
-      });
+    const userStatus = user?.status ?? UserStatus.ACTIVE;
+    if (!user || userStatus === UserStatus.BANNED) {
+      // Avoid leaking which side failed; record + throw same error
+      this.recordLoginFailure(identifier, ipAddress);
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    this.rateLimitService.recordLoginSuccess(email, ipAddress);
+    if (dto.password) {
+      if (!this.verifyPassword(dto.password, user.passwordHash)) {
+        this.recordLoginFailure(identifier, ipAddress);
+        throw new UnauthorizedException('Invalid credentials');
+      }
+    } else {
+      const channel = dto.email ? OtpChannel.EMAIL : OtpChannel.SMS;
+      try {
+        await this.otpService.consume({
+          channel,
+          identifier,
+          purpose: OtpPurpose.LOGIN,
+          code: dto.otpCode!,
+        });
+      } catch (err) {
+        this.recordLoginFailure(identifier, ipAddress);
+        throw err;
+      }
+    }
+
+    this.rateLimitService.recordLoginSuccess(identifier, ipAddress);
 
     const profile: AuthUser = {
       id: user.id,
       email: user.email,
+      phone: user.phone,
       username: user.username,
       role: user.role,
     };
@@ -126,10 +187,11 @@ export class AuthService {
     }
 
     const user = await this.prisma.user.findUnique({
-      where: { email: payload.email },
+      where: { id: payload.sub },
       select: {
         id: true,
         email: true,
+        phone: true,
         username: true,
         role: true,
         status: true,
@@ -137,15 +199,16 @@ export class AuthService {
       },
     });
 
-    const userStatus = user && 'status' in user ? user.status : UserStatus.ACTIVE;
+    const userStatus = user?.status ?? UserStatus.ACTIVE;
     const tokenVersion = user?.tokenVersion ?? 0;
-    if (!user || user.id !== payload.sub || userStatus === UserStatus.BANNED || tokenVersion !== payload.ver) {
+    if (!user || userStatus === UserStatus.BANNED || tokenVersion !== payload.ver) {
       throw new UnauthorizedException('Token invalidated');
     }
 
     return {
       id: user.id,
       email: user.email,
+      phone: user.phone,
       username: user.username,
       role: user.role,
     };
@@ -219,6 +282,16 @@ export class AuthService {
     });
   }
 
+  private recordLoginFailure(identifier: string, ip: string): void {
+    this.rateLimitService.recordLoginFailure({
+      email: identifier,
+      ip,
+      failureWindowMs: this.getNumber('RATE_LIMIT_LOGIN_FAILURE_WINDOW_MS', 60_000),
+      maxFailures: this.getNumber('RATE_LIMIT_LOGIN_MAX_FAILURES', 5),
+      lockMs: this.getNumber('RATE_LIMIT_LOGIN_LOCK_MS', 5 * 60_000),
+    });
+  }
+
   private hashPassword(password: string): string {
     const salt = randomBytes(16).toString('hex');
     const derived = scryptSync(password, salt, 64).toString('hex');
@@ -248,6 +321,7 @@ export class AuthService {
       type: 'access',
       sub: user.id,
       email: user.email,
+      phone: user.phone,
       username: user.username,
       role: user.role,
       ver: tokenVersion,
@@ -284,7 +358,6 @@ export class AuthService {
     if (
       payload.type !== 'access' ||
       !payload.sub ||
-      !payload.email ||
       !payload.username ||
       !payload.role ||
       typeof payload.ver !== 'number' ||
@@ -336,6 +409,7 @@ export class AuthService {
       select: {
         id: true,
         email: true,
+        phone: true,
         username: true,
         role: true,
         status: true,
@@ -347,6 +421,7 @@ export class AuthService {
     return {
       id: user.id,
       email: user.email,
+      phone: user.phone,
       username: user.username,
       role: user.role,
     };

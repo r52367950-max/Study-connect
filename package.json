@@ -25,7 +25,11 @@
     "test:min-admin-update-review-errors": "ts-node scripts/min-admin-update-material-review-error-check.ts",
     "test:min-material-upload-size-boundary": "ts-node scripts/min-material-upload-size-boundary-check.ts",
     "test:min-material-upload-security-regression": "ts-node scripts/min-material-upload-security-regression-check.ts",
-    "test:min-cors-config": "ts-node scripts/min-cors-config-check.ts"
+    "test:min-cors-config": "ts-node scripts/min-cors-config-check.ts",
+    "test:min-recommendations": "ts-node scripts/min-recommendations-check.ts"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.0",

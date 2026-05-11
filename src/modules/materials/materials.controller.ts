@@ -24,12 +24,15 @@ import {
 import { Request } from 'express';
 import { Public } from '../auth/decorators/public.decorator';
 import { RateLimit } from '../../common/rate-limit.decorator';
+import { PrismaService } from '../../infra';
 import { CreateMaterialDto } from './dto/create-material.dto';
 import { CreateRatingDto } from './dto/create-rating.dto';
 import { MaterialRatingsQueryDto } from './dto/material-ratings-query.dto';
 import { MaterialSearchQueryDto } from './dto/material-search-query.dto';
+import { RecommendQueryDto } from './dto/recommend-query.dto';
 import { UploadFileInput } from './file-upload.type';
 import { MaterialsService, UploadedMaterial } from './materials.service';
+import { RecommendationsService } from './recommendations.service';
 import {
   ALLOWED_MIME_TYPES,
   assertUploadFileSize,
@@ -43,6 +46,8 @@ import {
 export class MaterialsController {
   constructor(
     private readonly materialsService: MaterialsService,
+    private readonly recommendationsService: RecommendationsService,
+    private readonly prisma: PrismaService,
   ) {}
 
   @Get()
@@ -50,6 +55,42 @@ export class MaterialsController {
   @ApiOperation({ summary: 'Public material search (APPROVED + PUBLIC only)' })
   list(@Query() query: MaterialSearchQueryDto) {
     return this.materialsService.searchApproved(query);
+  }
+
+  @Get('recommend')
+  @RateLimit({ name: 'materials-recommend', limit: 60, windowMs: 60_000 })
+  @ApiOperation({ summary: 'Personalized recommendation list based on profile + history' })
+  async recommend(@Req() req: Request, @Query() query: RecommendQueryDto) {
+    const profile = await this.prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: {
+        id: true,
+        subjects: true,
+        grades: true,
+        stages: true,
+        city: true,
+        viewedKinds: true,
+        schoolId: true,
+        collaborativeOptIn: true,
+      },
+    });
+    if (!profile) {
+      return { items: [] };
+    }
+    const items = await this.recommendationsService.recommend(
+      {
+        id: profile.id,
+        subjects: profile.subjects,
+        grades: profile.grades,
+        stages: profile.stages,
+        city: profile.city,
+        viewedKinds: profile.viewedKinds,
+        schoolId: profile.schoolId,
+        collaborativeOptIn: profile.collaborativeOptIn,
+      },
+      { limit: query.limit, ranker: query.ranker },
+    );
+    return { items };
   }
 
   @Get(':id')

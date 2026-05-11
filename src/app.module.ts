@@ -11,10 +11,13 @@ import { AuthModule } from './modules/auth/auth.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { DownloadsModule } from './modules/downloads/downloads.module';
+import { FavoritesModule } from './modules/favorites/favorites.module';
 import { MaterialsModule } from './modules/materials/materials.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
+import { SchoolsModule } from './modules/schools/schools.module';
 import { SearchModule } from './modules/search/search.module';
 import { UsersModule } from './modules/users/users.module';
+import { ViewEventsModule } from './modules/view-events/view-events.module';
 
 export const APP_GUARD_CHAIN = [RateLimitGuard, CsrfGuard, JwtAuthGuard, RolesGuard] as const;
 
@@ -35,6 +38,9 @@ const appGuardProviders: Provider[] = APP_GUARD_CHAIN.map((guardClass: Type<unkn
     AuthModule,
     UsersModule,
     MaterialsModule,
+    FavoritesModule,
+    SchoolsModule,
+    ViewEventsModule,
     AdminModule,
     ReviewsModule,
     DownloadsModule,
