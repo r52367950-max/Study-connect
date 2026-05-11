@@ -85,8 +85,11 @@ class PrismaServiceMock {
         ...(select.role ? { role: user.role } : {}),
       };
     },
-    findUnique: async ({ where }: { where: { email: string } }) => {
-      return this.users.find((user) => user.email === where.email) ?? null;
+    findUnique: async ({ where }: { where: { email?: string; id?: string } }) => {
+      return this.users.find((user) =>
+        (where.email !== undefined && user.email === where.email) ||
+        (where.id !== undefined && user.id === where.id),
+      ) ?? null;
     },
   };
 

@@ -67,8 +67,11 @@ class PrismaServiceMock {
         ...(select.role ? { role: user.role } : {}),
       };
     },
-    findUnique: async ({ where }: { where: { email: string } }) => {
-      return this.users.find((user) => user.email === where.email) ?? null;
+    findUnique: async ({ where }: { where: { email?: string; id?: string } }) => {
+      return this.users.find((user) =>
+        (where.email !== undefined && user.email === where.email) ||
+        (where.id !== undefined && user.id === where.id),
+      ) ?? null;
     },
   };
 
@@ -217,12 +220,12 @@ async function run(): Promise<void> {
   await fetch(`${base}/auth/register`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: 'user@example.com', username: 'user1', password: 'StrongPass123!' }),
+    body: JSON.stringify({ email: 'user@example.com', username: 'user1', password: 'StrongPass123!', otpCode: '000000' }),
   });
   await fetch(`${base}/auth/register`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: 'admin@example.com', username: 'admin1', password: 'StrongPass123!' }),
+    body: JSON.stringify({ email: 'admin@example.com', username: 'admin1', password: 'StrongPass123!', otpCode: '000000' }),
   });
 
   prismaMock.setUserRole('admin@example.com', 'ADMIN');

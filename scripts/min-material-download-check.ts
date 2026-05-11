@@ -82,8 +82,11 @@ class PrismaServiceMock {
         ...(select.role ? { role: user.role } : {}),
       };
     },
-    findUnique: async ({ where }: { where: { email: string } }) => {
-      return this.users.find((u) => u.email === where.email) ?? null;
+    findUnique: async ({ where }: { where: { email?: string; id?: string } }) => {
+      return this.users.find((u) =>
+        (where.email !== undefined && u.email === where.email) ||
+        (where.id !== undefined && u.id === where.id),
+      ) ?? null;
     },
   };
 
@@ -224,6 +227,8 @@ class MinioServiceMock {
 
 async function run(): Promise<void> {
   process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'task6-secret';
+
+  process.env.AUTH_OTP_TEST_BYPASS = process.env.AUTH_OTP_TEST_BYPASS ?? 'true';
   process.env.CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://frontend.local:3000';
 
   const prismaMock = new PrismaServiceMock();
@@ -297,6 +302,7 @@ async function run(): Promise<void> {
       email: 'downloader@example.com',
       username: 'downloader',
       password: 'StrongPass123!',
+      otpCode: '000000',
     }),
   });
   const registered = (await registerRes.json()) as { user: { id: string } };

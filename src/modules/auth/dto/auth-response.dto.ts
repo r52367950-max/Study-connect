@@ -4,8 +4,11 @@ export class AuthUserDto {
   @ApiProperty()
   id!: string;
 
-  @ApiProperty()
-  email!: string;
+  @ApiProperty({ required: false, nullable: true })
+  email!: string | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  phone!: string | null;
 
   @ApiProperty()
   username!: string;

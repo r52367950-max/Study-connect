@@ -73,12 +73,12 @@ class PrismaServiceMock {
       data,
       select,
     }: {
-      data: { email: string; username: string; passwordHash: string; role: UserRole };
+      data: { email?: string | null; phone?: string | null; username: string; passwordHash: string; role: UserRole };
       select: { id?: boolean; email?: boolean; username?: boolean; role?: boolean };
     }) => {
       const user: DbUser = {
         id: crypto.randomUUID(),
-        email: data.email,
+        email: data.email ?? '',
         username: data.username,
         passwordHash: data.passwordHash,
         role: data.role,
@@ -91,8 +91,11 @@ class PrismaServiceMock {
         ...(select.role ? { role: user.role } : {}),
       };
     },
-    findUnique: async ({ where }: { where: { email: string } }) => {
-      return this.users.find((u) => u.email === where.email) ?? null;
+    findUnique: async ({ where }: { where: { email?: string; id?: string } }) => {
+      return this.users.find((u) =>
+        (where.email !== undefined && u.email === where.email) ||
+        (where.id !== undefined && u.id === where.id),
+      ) ?? null;
     },
   };
 
@@ -298,6 +301,8 @@ class MinioServiceMock {
 
 async function run(): Promise<void> {
   process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'task7-secret';
+  process.env.AUTH_OTP_TEST_BYPASS = process.env.AUTH_OTP_TEST_BYPASS ?? 'true';
+  process.env.CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://frontend.local:3000';
 
   const prismaMock = new PrismaServiceMock();
 
@@ -311,6 +316,13 @@ async function run(): Promise<void> {
     .compile();
 
   const app = moduleRef.createNestApplication();
+  app.enableCors({
+    origin: ['http://frontend.local:3000'],
+    credentials: true,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
+    optionsSuccessStatus: 204,
+  });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }));
   await app.init();
   await app.listen(0);
@@ -318,23 +330,44 @@ async function run(): Promise<void> {
   const address = app.getHttpServer().address();
   const port = typeof address === 'string' ? 3000 : address.port;
   const base = `http://127.0.0.1:${port}`;
+  const allowedOrigin = 'http://frontend.local:3000';
 
+  async function issueCsrf(): Promise<{ token: string; cookie: string }> {
+    const res = await fetch(`${base}/auth/csrf`, { headers: { origin: allowedOrigin } });
+    const json = (await res.json()) as { csrfToken: string };
+    const cookie = (res.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+    return { token: json.csrfToken, cookie };
+  }
+
+  const registerCsrf = await issueCsrf();
   const registerRes = await fetch(`${base}/auth/register`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      origin: allowedOrigin,
+      cookie: registerCsrf.cookie,
+      'x-csrf-token': registerCsrf.token,
+    },
     body: JSON.stringify({
       email: 'rating-user@example.com',
       username: 'rating_user',
       password: 'StrongPass123!',
+      otpCode: '000000',
     }),
   });
   const registerBody = (await registerRes.json()) as { user: { id: string } };
 
   const seeded = prismaMock.seedMaterials(registerBody.user.id);
 
+  const loginCsrf = await issueCsrf();
   const loginRes = await fetch(`${base}/auth/login`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      origin: allowedOrigin,
+      cookie: loginCsrf.cookie,
+      'x-csrf-token': loginCsrf.token,
+    },
     body: JSON.stringify({
       email: 'rating-user@example.com',
       password: 'StrongPass123!',
@@ -342,11 +375,15 @@ async function run(): Promise<void> {
   });
   const loginBody = (await loginRes.json()) as { accessToken: string };
 
+  const ratingCsrf = await issueCsrf();
   const firstRatingRes = await fetch(`${base}/materials/${seeded.approvedId}/ratings`, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${loginBody.accessToken}`,
       'content-type': 'application/json',
+      origin: allowedOrigin,
+      cookie: ratingCsrf.cookie,
+      'x-csrf-token': ratingCsrf.token,
     },
     body: JSON.stringify({
       score: 4,
@@ -360,11 +397,15 @@ async function run(): Promise<void> {
   const firstRatingJson = JSON.parse(firstRatingBody) as { content?: string | null };
   assert(firstRatingJson.content === 'First review', 'first rating response should include content');
 
+  const rating2Csrf = await issueCsrf();
   const secondRatingRes = await fetch(`${base}/materials/${seeded.approvedId}/ratings`, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${loginBody.accessToken}`,
       'content-type': 'application/json',
+      origin: allowedOrigin,
+      cookie: rating2Csrf.cookie,
+      'x-csrf-token': rating2Csrf.token,
     },
     body: JSON.stringify({
       score: 5,
@@ -378,11 +419,15 @@ async function run(): Promise<void> {
   const secondRatingJson = JSON.parse(secondRatingBody) as { content?: string | null };
   assert(secondRatingJson.content === 'Updated review', 'updated rating response should include latest content');
 
+  const pendingCsrf = await issueCsrf();
   const pendingRatingRes = await fetch(`${base}/materials/${seeded.pendingId}/ratings`, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${loginBody.accessToken}`,
       'content-type': 'application/json',
+      origin: allowedOrigin,
+      cookie: pendingCsrf.cookie,
+      'x-csrf-token': pendingCsrf.token,
     },
     body: JSON.stringify({
       score: 3,

@@ -137,6 +137,8 @@ function extractCookie(setCookie: string, key: string): string {
 
 async function run(): Promise<void> {
   process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'test-secret';
+
+  process.env.AUTH_OTP_TEST_BYPASS = process.env.AUTH_OTP_TEST_BYPASS ?? 'true';
   process.env.CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://frontend.local:3000';
 
   const prismaMock = new PrismaServiceMock();
@@ -191,6 +193,7 @@ async function run(): Promise<void> {
       email: 'student@example.com',
       username: 'student',
       password: 'StrongPass123!',
+      otpCode: '000000',
     }),
   });
 
@@ -290,6 +293,7 @@ async function run(): Promise<void> {
       email: 'admin@example.com',
       username: 'admin',
       password: 'StrongPass123!',
+      otpCode: '000000',
     }),
   });
   const admin = (await prismaMock.user.findUnique({ where: { email: 'admin@example.com' } })) as DbUser;
@@ -327,7 +331,7 @@ async function run(): Promise<void> {
   console.log('change password status:', changePwdRes.status);
   console.log('me by old token after password change (expected 401):', meByOldTokenAfterPasswordChange.status);
   console.log('old password login status (expected 401):', oldPwdLoginRes.status);
-  console.log('new password login status (expected 201):', newPwdLoginRes.status);
+  console.log('new password login status (expected 200):', newPwdLoginRes.status);
   console.log('ban status:', banRes.status);
   console.log('me by old token after ban (expected 401):', meByOldTokenAfterBan.status);
 
@@ -337,7 +341,7 @@ async function run(): Promise<void> {
   if (meByOldTokenAfterPasswordChange.status !== 401) {
     throw new Error('old token should be invalid immediately after password change');
   }
-  if (oldPwdLoginRes.status !== 401 || newPwdLoginRes.status !== 201) {
+  if (oldPwdLoginRes.status !== 401 || newPwdLoginRes.status !== 200) {
     throw new Error('password rotation login assertions failed');
   }
   if (banRes.status !== 201 || meByOldTokenAfterBan.status !== 401) {

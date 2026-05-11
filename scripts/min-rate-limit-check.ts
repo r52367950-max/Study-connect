@@ -54,12 +54,12 @@ class PrismaServiceMock {
       data,
       select,
     }: {
-      data: { email: string; username: string; passwordHash: string; role: UserRole };
+      data: { email?: string | null; phone?: string | null; username: string; passwordHash: string; role: UserRole };
       select: { id?: boolean; email?: boolean; username?: boolean; role?: boolean };
     }) => {
       const user: DbUser = {
         id: crypto.randomUUID(),
-        email: data.email,
+        email: data.email ?? '',
         username: data.username,
         passwordHash: data.passwordHash,
         role: data.role,
@@ -76,8 +76,11 @@ class PrismaServiceMock {
       };
     },
 
-    findUnique: async ({ where }: { where: { email: string } }) => {
-      return this.users.find((user) => user.email === where.email) ?? null;
+    findUnique: async ({ where }: { where: { email?: string; id?: string } }) => {
+      return this.users.find((user) =>
+        (where.email !== undefined && user.email === where.email) ||
+        (where.id !== undefined && user.id === where.id),
+      ) ?? null;
     },
   };
 
@@ -159,6 +162,15 @@ class PrismaServiceMock {
         return null;
       }
       return this.pick(found, select);
+    },
+
+    update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+      const idx = this.materials.findIndex((m) => m.id === where.id);
+      if (idx >= 0) {
+        this.materials[idx] = { ...this.materials[idx], ...(data as Partial<DbMaterial>) };
+        return this.materials[idx];
+      }
+      return null;
     },
   };
 
@@ -258,6 +270,7 @@ function readCookiePair(setCookieHeader: string | null, cookieName: string): str
 
 async function run(): Promise<void> {
   process.env.JWT_SECRET = 'rate-limit-test-secret';
+  process.env.AUTH_OTP_TEST_BYPASS = process.env.AUTH_OTP_TEST_BYPASS ?? 'true';
   process.env.CORS_ORIGIN = 'http://frontend.local:3000';
 
   process.env.RATE_LIMIT_GLOBAL_LIMIT = '999';
@@ -325,7 +338,7 @@ async function run(): Promise<void> {
   }
 
   async function registerUser(
-    input: { email: string; username: string; password: string },
+    input: { email: string; username: string; password: string; otpCode?: string },
   ): Promise<{ authCookie: string }> {
     const csrf = await issueCsrfCookie();
     const res = await fetch(`${base}/auth/register`, {
@@ -348,11 +361,12 @@ async function run(): Promise<void> {
     };
   }
 
-  await registerUser({ email: 'admin@example.com', username: 'admin', password: 'StrongPass123!' });
+  await registerUser({ email: 'admin@example.com', username: 'admin', password: 'StrongPass123!', otpCode: '000000' });
   const uploaderRegister = await registerUser({
     email: 'uploader@example.com',
     username: 'uploader',
     password: 'StrongPass123!',
+    otpCode: '000000',
   });
 
   prismaMock.setUserRole('admin@example.com', 'ADMIN');
@@ -451,6 +465,7 @@ async function run(): Promise<void> {
 
   assertBlockedLog(capturedLogs, {
     rule: 'auth-login-ip-email',
+    altRule: 'auth-login-lock',
     route: '/auth/login',
     method: 'POST',
     hint: 'login',
@@ -490,20 +505,21 @@ function parseRateLimitLog(message: string): RateLimitLogEvent | null {
 
 function assertBlockedLog(
   logs: RateLimitLogEvent[],
-  expected: { rule: string; route: string; method: string; hint: string },
+  expected: { rule: string; altRule?: string; route: string; method: string; hint: string },
 ): void {
   const found = logs.find(
     (item) =>
       item.event === 'rate_limit_blocked' &&
-      item.rule === expected.rule &&
+      (item.rule === expected.rule || (expected.altRule !== undefined && item.rule === expected.altRule)) &&
       item.route === expected.route &&
       item.method === expected.method,
   );
 
   if (!found) {
     const blockedLogs = logs.filter((item) => item.event === 'rate_limit_blocked');
+    const ruleDesc = expected.altRule !== undefined ? `${expected.rule}|${expected.altRule}` : expected.rule;
     throw new Error(
-      `${expected.hint} rate_limit_blocked log assert failed, expected ${expected.method} ${expected.route} / ${expected.rule}, got=${JSON.stringify(
+      `${expected.hint} rate_limit_blocked log assert failed, expected ${expected.method} ${expected.route} / ${ruleDesc}, got=${JSON.stringify(
         blockedLogs,
       )}`,
     );

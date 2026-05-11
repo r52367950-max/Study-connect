@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -65,6 +65,7 @@ export class AuthController {
 
   @Public()
   @Post('login')
+  @HttpCode(200)
   @RateLimit({
     name: 'auth-login-ip',
     limit: 25,
@@ -161,6 +162,7 @@ export class AuthController {
     return {
       id: user.id,
       email: user.email,
+      phone: user.phone,
       username: user.username,
       role: user.role,
     };
