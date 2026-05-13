@@ -5,7 +5,7 @@
  * unit-tested without a Next.js edge runtime.
  */
 
-const AUTH_REQUIRED = ['/upload', '/profile', '/admin']
+const AUTH_REQUIRED = ['/upload', '/profile', '/admin', '/onboarding']
 
 export function requiresAuth(pathname: string): boolean {
   return AUTH_REQUIRED.some((p) => pathname.startsWith(p))
