@@ -193,8 +193,34 @@ security-related PR must:
 
 Do not weaken these checks to "make CI pass" — fix the root cause.
 
+## Active roadmap — DirB prototype rollout
+
+The project is mid-way through landing a Claude Design interaction prototype (sidebar + 5-page
+"DirB" shell, onboarding flow, email/phone OTP, favorites, recommendations, ⌘K command palette,
+etc.) into the real repo. Work is split into **6 UI phases**, each shipped as its own mergeable PR,
+plus two cross-cutting workstreams: **S — security & stability hardening** (includes
+must-fix-before-prod items) and **P — performance & platform** (Postgres FTS, Redis cache,
+Node 22, recommendation cold-start tiering, Pino/Sentry monitoring).
+
+- **Full plan, per-phase status, and the corrected assumptions live in
+  `docs/dirb-prototype-rollout-plan.md` — read it before touching related code.**
+- **Current state**: Phase 1 (backend foundation — Prisma profile/Favorites/Schools/ViewEvents,
+  OTP, recommendation scoring, seed) is **done and merged** (PR #48). Phases 2–6 not started; the
+  current starting point is **Phase 2** (frontend onboarding + dual-identifier login). Workstreams
+  S and P are tracked in the same doc and not yet started.
+- **Feature dev branch**: `claude/check-design-access-JDMor` (this `CLAUDE.md`/docs work is on a
+  separate `claude/add-claude-documentation-*` branch).
+- **Heads-up**: Phase 3 makes a **breaking change** — the existing `/materials` grid is replaced by
+  the DirB "all materials" sub-page and a new `(app)` route group is added; see §3.1 of the plan
+  before editing those routes or their tests. Before changing auth / rate-limiting / uploads / CORS
+  code, also read workstream S in the plan **and** `docs/security-gate-policy.md`.
+- A few items in older planning text are out of date vs. reality (uuid not cuid; npm not pnpm; no
+  Redis yet — OTP uses an `OtpAttempt` table + HMAC; SMS is Aliyun) — the rollout plan's
+  "corrections" section is authoritative.
+
 ## Reference docs
 
+- `docs/dirb-prototype-rollout-plan.md` — the active rollout roadmap (6 UI phases + workstreams S/P), per-phase status, corrected assumptions. **Single source of truth for in-flight work.**
 - `docs/backend_dev_guide_and_codex_tasks.md` — original backend plan & scope (Chinese; partly outdated re: tooling).
 - `docs/error-code-spec.md` — HTTP status-code semantics per endpoint.
 - `docs/rate-limit-rules.md` — every active rate-limit rule + tunable env vars.
