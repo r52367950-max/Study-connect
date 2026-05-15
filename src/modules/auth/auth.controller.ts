@@ -125,8 +125,14 @@ export class AuthController {
   ): Promise<{ success: true }> {
     const token = this.extractCookieToken(req, 'auth-token');
     if (token) {
-      const user = await this.authService.verifyAccessToken(token);
-      await this.authService.rotateTokenVersion(user.id);
+      try {
+        const user = await this.authService.verifyAccessToken(token);
+        await this.authService.rotateTokenVersion(user.id);
+      } catch {
+        // Token may be expired / tampered / already invalidated. Either way
+        // logout must still clear the cookies so the client returns to a
+        // clean state.
+      }
     }
     this.clearAuthCookies(response);
     return { success: true };
