@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
+import { normalizeOrigin } from './cors-config';
 import { CsrfService } from './csrf.service';
 
 const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -40,7 +41,11 @@ export class CsrfGuard implements CanActivate {
   private extractRequestOrigin(request: Request): string {
     const origin = request.headers.origin;
     if (typeof origin === 'string' && origin.length > 0) {
-      return origin;
+      try {
+        return normalizeOrigin(origin);
+      } catch {
+        throw new ForbiddenException('Invalid origin header');
+      }
     }
 
     const referer = request.headers.referer;
@@ -67,6 +72,13 @@ export class CsrfGuard implements CanActivate {
     return raw
       .split(',')
       .map((origin) => origin.trim())
-      .filter((origin) => origin.length > 0);
+      .filter((origin) => origin.length > 0)
+      .map((origin) => {
+        try {
+          return normalizeOrigin(origin);
+        } catch {
+          return origin;
+        }
+      });
   }
 }

@@ -1,26 +1,28 @@
+export function normalizeOrigin(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`Invalid origin "${raw}": expected protocol://host:port`);
+  }
+
+  if (!url.protocol || !url.hostname) {
+    throw new Error(`Invalid origin "${raw}": protocol and hostname are required`);
+  }
+
+  if (url.pathname !== '/' || url.search || url.hash || url.username || url.password) {
+    throw new Error(`Invalid origin "${raw}": must only contain protocol, hostname, and optional port`);
+  }
+
+  return url.origin;
+}
+
 export function parseAllowedCorsOrigins(rawValue: string | undefined = process.env.CORS_ORIGIN): string[] {
   return (rawValue ?? '')
     .split(',')
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0)
-    .map((origin) => {
-      let url: URL;
-      try {
-        url = new URL(origin);
-      } catch {
-        throw new Error(`Invalid CORS origin "${origin}": expected protocol://host:port`);
-      }
-
-      if (!url.protocol || !url.hostname) {
-        throw new Error(`Invalid CORS origin "${origin}": protocol and hostname are required`);
-      }
-
-      if (url.pathname !== '/' || url.search || url.hash || url.username || url.password) {
-        throw new Error(`Invalid CORS origin "${origin}": must only contain protocol, hostname, and optional port`);
-      }
-
-      return url.origin;
-    });
+    .map(normalizeOrigin);
 }
 
 export function assertCorsConfigInProduction(
