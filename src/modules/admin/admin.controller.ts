@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpStatus, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -13,6 +13,10 @@ import { OfflineMaterialDto } from './dto/offline-material.dto';
 import { PendingMaterialsQueryDto } from './dto/pending-materials-query.dto';
 import { RejectMaterialDto } from './dto/reject-material.dto';
 import { AdminService } from './admin.service';
+
+// Admin operations on a missing material/user surface as 404 to match
+// docs/error-code-spec.md (Admin Review section).
+const adminIdParam = new ParseUUIDPipe({ errorHttpStatusCode: HttpStatus.NOT_FOUND });
 
 @ApiTags('admin')
 @ApiBearerAuth()
@@ -43,26 +47,26 @@ export class AdminController {
       },
     },
   })
-  approve(@Param('id') id: string, @Req() req: Request) {
+  approve(@Param('id', adminIdParam) id: string, @Req() req: Request) {
     return this.adminService.approveMaterial(id, req.user.id);
   }
 
 
   @Post('materials/:id/offline')
   @ApiOperation({ summary: 'Offline one material' })
-  offline(@Param('id') id: string, @Body() dto: OfflineMaterialDto, @Req() req: Request) {
+  offline(@Param('id', adminIdParam) id: string, @Body() dto: OfflineMaterialDto, @Req() req: Request) {
     return this.adminService.offlineMaterial(id, req.user.id, dto.reviewComment);
   }
 
   @Post('materials/:id/reject')
   @ApiOperation({ summary: 'Reject one material with reason' })
-  reject(@Param('id') id: string, @Body() dto: RejectMaterialDto, @Req() req: Request) {
+  reject(@Param('id', adminIdParam) id: string, @Body() dto: RejectMaterialDto, @Req() req: Request) {
     return this.adminService.rejectMaterial(id, dto.reason, req.user.id);
   }
 
   @Post('users/:id/ban')
   @ApiOperation({ summary: 'Ban one user and invalidate active tokens immediately' })
-  banUser(@Param('id') id: string) {
+  banUser(@Param('id', adminIdParam) id: string) {
     return this.adminService.banUser(id);
   }
 }
