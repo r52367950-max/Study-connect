@@ -73,14 +73,14 @@ export class RateLimitService {
   }
 
   recordLoginFailure(input: {
-    email: string;
+    identifier: string;
     ip: string;
     failureWindowMs: number;
     maxFailures: number;
     lockMs: number;
   }): void {
     const now = Date.now();
-    for (const key of this.buildLoginLockKeys(input.email, input.ip)) {
+    for (const key of this.buildLoginLockKeys(input.identifier)) {
       const state = this.loginLocks.get(key);
       if (!state || now - state.firstFailureAt > input.failureWindowMs) {
         this.loginLocks.set(key, {
@@ -107,14 +107,14 @@ export class RateLimitService {
     }
   }
 
-  recordLoginSuccess(email: string, ip: string): void {
-    for (const key of this.buildLoginLockKeys(email, ip)) {
+  recordLoginSuccess(identifier: string): void {
+    for (const key of this.buildLoginLockKeys(identifier)) {
       this.loginLocks.delete(key);
     }
   }
 
-  private buildLoginLockKeys(email: string, ip: string): string[] {
-    return [`login-email:${email.toLowerCase()}`, `login-ip-email:${ip}:${email.toLowerCase()}`];
+  private buildLoginLockKeys(identifier: string): string[] {
+    return [`login-id:${identifier.toLowerCase()}`];
   }
 
   private recordLimitHit(input: {

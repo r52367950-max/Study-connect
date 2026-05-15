@@ -57,9 +57,9 @@ export class RateLimitGuard implements CanActivate {
     }
 
     if (method === 'POST' && request.path === '/auth/login') {
-      const email = this.extractEmail(request);
-      if (email) {
-        const lock = this.rateLimitService.checkLoginLock(`login-email:${email}`);
+      const identity = this.extractIdentifier(request);
+      if (identity) {
+        const lock = this.rateLimitService.checkLoginLock(`login-id:${identity}`);
         if (lock.locked) {
           throw new HttpException(
             `Too many login failures, retry in ${Math.ceil(lock.retryAfterMs / 1000)}s`,
@@ -73,7 +73,7 @@ export class RateLimitGuard implements CanActivate {
           windowMs: this.getNumber('RATE_LIMIT_LOGIN_WINDOW_MS', DEFAULT_LOGIN_WINDOW_MS),
         };
 
-        this.assertAllowed(loginRule, `${ip}:${email}`, { route, method, ip });
+        this.assertAllowed(loginRule, `${ip}:${identity}`, { route, method, ip });
       }
     }
 
@@ -120,13 +120,18 @@ export class RateLimitGuard implements CanActivate {
     return request.ip || request.socket.remoteAddress || 'unknown';
   }
 
-  private extractEmail(request: Request): string | null {
-    const body = request.body as { email?: unknown };
-    if (!body || typeof body.email !== 'string') {
+  private extractIdentifier(request: Request): string | null {
+    const body = request.body as { email?: unknown; phone?: unknown };
+    if (!body) {
       return null;
     }
-
-    return body.email.trim().toLowerCase();
+    if (typeof body.email === 'string' && body.email.trim().length > 0) {
+      return body.email.trim().toLowerCase();
+    }
+    if (typeof body.phone === 'string' && body.phone.trim().length > 0) {
+      return body.phone.trim();
+    }
+    return null;
   }
 
   private getNumber(key: string, fallback: number): number {

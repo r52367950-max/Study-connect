@@ -114,10 +114,7 @@ export class AuthService {
     }
 
     const identifier = (dto.email ?? dto.phone)!.toLowerCase();
-    // RateLimitService namespaces login locks under `login-email:<id>`; reuse it
-    // for phone too. Email identifiers contain '@' and phone identifiers are
-    // digits, so they never collide in the same bucket.
-    const lock = this.rateLimitService.checkLoginLock(`login-email:${identifier}`);
+    const lock = this.rateLimitService.checkLoginLock(`login-id:${identifier}`);
     if (lock.locked) {
       throw new HttpException(
         `Too many login failures, retry in ${Math.ceil(lock.retryAfterMs / 1000)}s`,
@@ -163,7 +160,7 @@ export class AuthService {
       }
     }
 
-    this.rateLimitService.recordLoginSuccess(identifier, ipAddress);
+    this.rateLimitService.recordLoginSuccess(identifier);
 
     const profile: AuthUser = {
       id: user.id,
@@ -285,7 +282,7 @@ export class AuthService {
 
   private recordLoginFailure(identifier: string, ip: string): void {
     this.rateLimitService.recordLoginFailure({
-      email: identifier,
+      identifier,
       ip,
       failureWindowMs: this.getNumber('RATE_LIMIT_LOGIN_FAILURE_WINDOW_MS', 60_000),
       maxFailures: this.getNumber('RATE_LIMIT_LOGIN_MAX_FAILURES', 5),
