@@ -8,6 +8,7 @@ export class FavoritesQueryDto {
   @Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)))
   @IsInt()
   @Min(1)
+  @Max(1000)
   page?: number;
 
   @ApiPropertyOptional({ example: 20, default: 20 })
