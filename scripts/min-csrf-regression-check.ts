@@ -1,5 +1,5 @@
 /// <reference path="../src/types/express.d.ts" />
-import { ValidationPipe } from '@nestjs/common';
+import { HttpStatus, ValidationPipe } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { readFile } from 'node:fs/promises';
@@ -253,6 +253,7 @@ async function run(): Promise<void> {
       whitelist: true,
       transform: true,
       forbidNonWhitelisted: true,
+      errorHttpStatusCode: HttpStatus.UNPROCESSABLE_ENTITY,
     }),
   );
 
