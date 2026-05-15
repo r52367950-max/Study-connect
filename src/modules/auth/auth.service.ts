@@ -12,6 +12,7 @@ import { OtpChannel, OtpPurpose, User, UserRole, UserStatus } from '@prisma/clie
 import { randomBytes, scryptSync, timingSafeEqual, createHmac } from 'crypto';
 import { PrismaService } from '../../infra';
 import { RateLimitService } from '../../common/rate-limit.service';
+import { normalizePhone } from '../../common/util';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { OtpService } from './otp/otp.service';
@@ -56,7 +57,9 @@ export class AuthService {
     }
 
     const channel = dto.email ? OtpChannel.EMAIL : OtpChannel.SMS;
-    const identifier = (dto.email ?? dto.phone)!.toLowerCase();
+    const identifier = dto.email
+      ? dto.email.toLowerCase()
+      : normalizePhone(dto.phone!);
 
     await this.otpService.consume({
       channel,
@@ -113,7 +116,9 @@ export class AuthService {
       throw new UnprocessableEntityException('Password or OTP code is required');
     }
 
-    const identifier = (dto.email ?? dto.phone)!.toLowerCase();
+    const identifier = dto.email
+      ? dto.email.toLowerCase()
+      : normalizePhone(dto.phone!);
     const lock = this.rateLimitService.checkLoginLock(`login-id:${identifier}`);
     if (lock.locked) {
       throw new HttpException(
