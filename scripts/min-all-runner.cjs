@@ -12,6 +12,11 @@ const checks = [
   'test:min-csrf-regression',
   'test:min-rate-limit',
   'test:min-recommendations',
+  'test:min-admin-update-review-errors',
+  'test:min-material-upload-size-boundary',
+  'test:min-material-upload-security-regression',
+  'test:min-cors-config',
+  'test:min-auth-token-hardening',
 ];
 
 const results = [];

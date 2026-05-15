@@ -248,6 +248,10 @@ async function run(): Promise<void> {
     headers: { authorization: `Bearer ${userToken}` },
   });
   console.log('user pending list status:', forbiddenRes.status);
+  if (forbiddenRes.status !== 401) {
+    process.exitCode = 1;
+    throw new Error(`expected user pending list status 401, got ${forbiddenRes.status}`);
+  }
 
   async function uploadOne(title: string): Promise<string> {
     const form = new FormData();
@@ -274,6 +278,10 @@ async function run(): Promise<void> {
   const pendingText = await pendingRes.text();
   console.log('admin pending list status:', pendingRes.status);
   console.log('admin pending list body:', pendingText);
+  if (pendingRes.status !== 200) {
+    process.exitCode = 1;
+    throw new Error(`expected admin pending list status 200, got ${pendingRes.status}`);
+  }
 
   const approveRes = await fetch(`${base}/admin/materials/${materialApproveId}/approve`, {
     method: 'POST',
@@ -282,6 +290,10 @@ async function run(): Promise<void> {
   const approveText = await approveRes.text();
   console.log('approve status:', approveRes.status);
   console.log('approve body:', approveText);
+  if (approveRes.status !== 200) {
+    process.exitCode = 1;
+    throw new Error(`expected approve status 200, got ${approveRes.status}`);
+  }
 
   const rejectRes = await fetch(`${base}/admin/materials/${materialRejectId}/reject`, {
     method: 'POST',
@@ -294,6 +306,10 @@ async function run(): Promise<void> {
   const rejectText = await rejectRes.text();
   console.log('reject status:', rejectRes.status);
   console.log('reject body:', rejectText);
+  if (rejectRes.status !== 200) {
+    process.exitCode = 1;
+    throw new Error(`expected reject status 200, got ${rejectRes.status}`);
+  }
 
 
   const offlineRes = await fetch(`${base}/admin/materials/${materialApproveId}/offline`, {
@@ -307,6 +323,10 @@ async function run(): Promise<void> {
   const offlineText = await offlineRes.text();
   console.log('offline status:', offlineRes.status);
   console.log('offline body:', offlineText);
+  if (offlineRes.status !== 200) {
+    process.exitCode = 1;
+    throw new Error(`expected offline status 200, got ${offlineRes.status}`);
+  }
 
   console.log('db offlined material:', JSON.stringify(prismaMock.debugMaterialById(materialApproveId)));
   console.log('db rejected material:', JSON.stringify(prismaMock.debugMaterialById(materialRejectId)));
