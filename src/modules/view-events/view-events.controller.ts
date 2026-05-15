@@ -17,7 +17,7 @@ export class ViewEventsController {
   constructor(private readonly viewEventsService: ViewEventsService) {}
 
   @Post()
-  @RateLimit({ name: 'view-events-log', limit: 120, windowMs: 60_000 })
+  @RateLimit({ name: 'view-events-log', limit: 60, windowMs: 60_000 })
   @ApiOperation({ summary: 'Record one impression / dwell signal for recommendations' })
   log(@Req() req: Request, @Body() dto: LogViewEventDto) {
     return this.viewEventsService.log(req.user.id, dto);
