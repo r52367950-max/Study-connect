@@ -8,6 +8,7 @@ import { useMutation } from '@tanstack/react-query'
 import { login, sendOtp, type LoginPayload } from '@/lib/api/auth'
 import { getMyProfile } from '@/lib/api/users'
 import { getErrorMessage } from '@/lib/api/client'
+import { safeRedirect } from '@/lib/utils'
 import { useAuth } from '@/hooks/use-auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -42,7 +43,7 @@ function LoginPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { isLoggedIn, setAuth } = useAuth()
-  const redirect = searchParams.get('redirect') ?? '/'
+  const redirect = safeRedirect(searchParams.get('redirect'))
 
   useEffect(() => {
     if (isLoggedIn) router.replace(redirect)

@@ -5,6 +5,7 @@ import {
   HttpStatus,
   Param,
   ParseFilePipeBuilder,
+  ParseUUIDPipe,
   Post,
   Query,
   Req,
@@ -39,6 +40,10 @@ import {
   getMaxUploadSizeMb,
   MAX_UPLOAD_SIZE_MB_KEY,
 } from './upload-security.util';
+
+// Unknown ids on this controller should look like the material doesn't exist,
+// not like a bad request — see docs/error-code-spec.md (Materials section).
+const materialIdParam = new ParseUUIDPipe({ errorHttpStatusCode: HttpStatus.NOT_FOUND });
 
 @ApiTags('materials')
 @ApiBearerAuth()
@@ -97,7 +102,7 @@ export class MaterialsController {
   @Public()
   @ApiOperation({ summary: 'Public material detail (APPROVED + PUBLIC only)' })
   @ApiParam({ name: 'id', type: String })
-  detail(@Param('id') id: string) {
+  detail(@Param('id', materialIdParam) id: string) {
     return this.materialsService.getApprovedDetail(id);
   }
 
@@ -105,7 +110,7 @@ export class MaterialsController {
   @Public()
   @ApiOperation({ summary: 'Public ratings list for one approved material' })
   @ApiParam({ name: 'id', type: String })
-  listRatings(@Param('id') id: string, @Query() query: MaterialRatingsQueryDto) {
+  listRatings(@Param('id', materialIdParam) id: string, @Query() query: MaterialRatingsQueryDto) {
     return this.materialsService.listApprovedMaterialRatings(id, query);
   }
 
@@ -117,7 +122,7 @@ export class MaterialsController {
   })
   @ApiOperation({ summary: 'Create or update one rating for one approved material (login required)' })
   @ApiParam({ name: 'id', type: String })
-  rateMaterial(@Param('id') id: string, @Req() req: Request, @Body() dto: CreateRatingDto) {
+  rateMaterial(@Param('id', materialIdParam) id: string, @Req() req: Request, @Body() dto: CreateRatingDto) {
     return this.materialsService.upsertMaterialRating({ materialId: id, userId: req.user.id, dto });
   }
 
@@ -129,7 +134,7 @@ export class MaterialsController {
   })
   @ApiOperation({ summary: 'Download one approved public material (login required; APPROVED + PUBLIC)' })
   @ApiParam({ name: 'id', type: String })
-  download(@Param('id') id: string, @Req() req: Request) {
+  download(@Param('id', materialIdParam) id: string, @Req() req: Request) {
     return this.materialsService.downloadApprovedMaterial(id, req.user.id);
   }
 

@@ -46,6 +46,16 @@ export function getFileTypeLabel(fileKey: string): string {
   return (map[ext] ?? ext.toUpperCase()) || '文件'
 }
 
+// Reject absolute URLs ("https://evil"), protocol-relative URLs ("//evil"),
+// and Windows-style backslash variants ("/\\evil"). Only same-origin paths
+// (starting with a single "/" and a non-slash/backslash char) pass through.
+export function safeRedirect(target: string | null | undefined): string {
+  if (!target || typeof target !== 'string') return '/'
+  if (!target.startsWith('/')) return '/'
+  if (target.startsWith('//') || target.startsWith('/\\')) return '/'
+  return target
+}
+
 export function buildQueryString(params: Record<string, unknown>): string {
   const filtered = Object.entries(params).filter(
     ([, v]) => v !== undefined && v !== null && v !== '',

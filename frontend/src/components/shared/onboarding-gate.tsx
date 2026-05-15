@@ -23,10 +23,11 @@ export function OnboardingGate() {
     if (!initialized || !isLoggedIn) return
     if (!profile) return
     if (profile.onboardedAt) return
-    if (ONBOARDING_EXEMPT_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
+    if (!pathname) return
+    if (ONBOARDING_EXEMPT_PREFIXES.some((p) => p === pathname || pathname.startsWith(`${p}/`))) {
       return
     }
-    const redirect = encodeURIComponent(pathname || '/')
+    const redirect = encodeURIComponent(pathname)
     router.replace(`/onboarding?redirect=${redirect}`)
   }, [initialized, isLoggedIn, profile, pathname, router])
 

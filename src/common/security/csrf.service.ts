@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { Response } from 'express';
+import { safeDecodeURIComponent } from '../util';
 
 const CSRF_COOKIE_NAME = 'csrf-token';
 const CSRF_HEADER_NAME = 'x-csrf-token';
@@ -39,7 +40,7 @@ export class CsrfService {
     for (const entry of cookieEntries) {
       const [rawName, ...rawValue] = entry.trim().split('=');
       if (rawName === CSRF_COOKIE_NAME && rawValue.length > 0) {
-        return decodeURIComponent(rawValue.join('='));
+        return safeDecodeURIComponent(rawValue.join('='));
       }
     }
     return null;
