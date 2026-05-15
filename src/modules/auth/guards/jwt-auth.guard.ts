@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
+import { safeDecodeURIComponent } from '../../../common/util';
 import { AuthService } from '../auth.service';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
@@ -55,7 +56,7 @@ export class JwtAuthGuard implements CanActivate {
     for (const entry of cookieEntries) {
       const [rawName, ...rawValue] = entry.trim().split('=');
       if (rawName === 'auth-token' && rawValue.length > 0) {
-        return decodeURIComponent(rawValue.join('='));
+        return safeDecodeURIComponent(rawValue.join('='));
       }
     }
 

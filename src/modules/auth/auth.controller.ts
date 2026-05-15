@@ -9,6 +9,7 @@ import { UserRole } from '@prisma/client';
 import { Request, Response } from 'express';
 import { CsrfService } from '../../common/security/csrf.service';
 import { RateLimit } from '../../common/rate-limit.decorator';
+import { safeDecodeURIComponent } from '../../common/util';
 import { Public } from './decorators/public.decorator';
 import { Roles } from './decorators/roles.decorator';
 import { AuthResponseDto, AuthUserDto } from './dto/auth-response.dto';
@@ -211,7 +212,7 @@ export class AuthController {
     for (const entry of cookieEntries) {
       const [rawName, ...rawValue] = entry.trim().split('=');
       if (rawName === key && rawValue.length > 0) {
-        return decodeURIComponent(rawValue.join('='));
+        return safeDecodeURIComponent(rawValue.join('='));
       }
     }
     return '';

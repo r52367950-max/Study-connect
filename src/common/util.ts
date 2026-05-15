@@ -8,3 +8,19 @@
 export function normalizePhone(raw: string): string {
   return raw.replace(/[\s-]/g, '');
 }
+
+/**
+ * decodeURIComponent throws URIError on malformed sequences ("%E0%A4%A"), which
+ * would surface as an uncaught 500 from cookie / header parsers. Wrap it so
+ * callers can treat a malformed value as "cookie not present" (return '').
+ */
+export function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch (err) {
+    if (err instanceof URIError) {
+      return '';
+    }
+    throw err;
+  }
+}
