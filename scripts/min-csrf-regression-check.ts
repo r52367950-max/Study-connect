@@ -21,22 +21,31 @@ type WriteRouteCase = {
 
 const CONTROLLER_FILES = [
   'src/modules/auth/auth.controller.ts',
+  'src/modules/auth/otp/otp.controller.ts',
   'src/modules/materials/materials.controller.ts',
   'src/modules/admin/admin.controller.ts',
+  'src/modules/users/users.controller.ts',
+  'src/modules/view-events/view-events.controller.ts',
+  'src/modules/favorites/favorites.controller.ts',
 ] as const;
 
 const EXPECTED_WRITE_ROUTES = [
-  'POST /auth/change-password',
-  'POST /auth/login',
-  'POST /auth/logout',
-  'POST /auth/refresh',
-  'POST /auth/register',
-  'POST /materials',
-  'POST /materials/:id/ratings',
+  'DELETE /favorites/:materialId',
   'POST /admin/materials/:id/approve',
   'POST /admin/materials/:id/offline',
   'POST /admin/materials/:id/reject',
   'POST /admin/users/:id/ban',
+  'POST /auth/change-password',
+  'POST /auth/login',
+  'POST /auth/logout',
+  'POST /auth/otp/send',
+  'POST /auth/refresh',
+  'POST /auth/register',
+  'POST /favorites/:materialId',
+  'POST /materials',
+  'POST /materials/:id/ratings',
+  'POST /view-events',
+  'PUT /users/me/profile',
 ] as const;
 
 const WRITE_ROUTE_CASES: WriteRouteCase[] = [
@@ -122,6 +131,43 @@ const WRITE_ROUTE_CASES: WriteRouteCase[] = [
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ reason: 'spam' }),
     },
+  },
+  {
+    method: 'POST',
+    templatePath: '/auth/otp/send',
+    resolvedPath: '/auth/otp/send',
+    init: {
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ channel: 'email', email: 'a@a.com', purpose: 'LOGIN' }),
+    },
+  },
+  {
+    method: 'PUT',
+    templatePath: '/users/me/profile',
+    resolvedPath: '/users/me/profile',
+    init: {
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    },
+  },
+  {
+    method: 'POST',
+    templatePath: '/view-events',
+    resolvedPath: '/view-events',
+    init: {
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ materialId: '00000000-0000-0000-0000-000000000000', kind: 'IMPRESSION' }),
+    },
+  },
+  {
+    method: 'POST',
+    templatePath: '/favorites/:materialId',
+    resolvedPath: '/favorites/00000000-0000-0000-0000-000000000000',
+  },
+  {
+    method: 'DELETE',
+    templatePath: '/favorites/:materialId',
+    resolvedPath: '/favorites/00000000-0000-0000-0000-000000000000',
   },
 ];
 
