@@ -15,7 +15,7 @@ describe('auth flow regression', () => {
   const originalAdapter = apiClient.defaults.adapter
 
   beforeEach(() => {
-    useAuthStore.setState({ user: null })
+    useAuthStore.setState({ user: null, accessToken: null, initialized: false })
   })
 
   afterEach(() => {
