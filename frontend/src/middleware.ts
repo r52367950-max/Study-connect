@@ -14,5 +14,14 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/upload/:path*', '/profile/:path*', '/admin/:path*', '/onboarding/:path*'],
+  matcher: [
+    '/upload',
+    '/upload/:path*',
+    '/profile',
+    '/profile/:path*',
+    '/admin',
+    '/admin/:path*',
+    '/onboarding',
+    '/onboarding/:path*',
+  ],
 }
