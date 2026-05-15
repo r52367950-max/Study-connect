@@ -5,6 +5,7 @@ import {
   HttpStatus,
   Injectable,
   UnauthorizedException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OtpChannel, OtpPurpose, User, UserRole, UserStatus } from '@prisma/client';
@@ -48,10 +49,10 @@ export class AuthService {
 
   async register(dto: RegisterDto): Promise<{ accessToken: string; refreshToken: string; user: AuthUser }> {
     if (!dto.email && !dto.phone) {
-      throw new BadRequestException('Email or phone is required');
+      throw new UnprocessableEntityException('Email or phone is required');
     }
     if (dto.email && dto.phone) {
-      throw new BadRequestException('Provide either email or phone, not both');
+      throw new UnprocessableEntityException('Provide either email or phone, not both');
     }
 
     const channel = dto.email ? OtpChannel.EMAIL : OtpChannel.SMS;
@@ -75,7 +76,7 @@ export class AuthService {
     });
 
     if (existing) {
-      throw new BadRequestException('Identifier or username already exists');
+      throw new UnprocessableEntityException('Identifier or username already exists');
     }
 
     const passwordHash = this.hashPassword(dto.password);
@@ -106,10 +107,10 @@ export class AuthService {
 
   async login(dto: LoginDto, ipAddress = 'unknown'): Promise<{ accessToken: string; refreshToken: string; user: AuthUser }> {
     if (!dto.email && !dto.phone) {
-      throw new BadRequestException('Email or phone is required');
+      throw new UnprocessableEntityException('Email or phone is required');
     }
     if (!dto.password && !dto.otpCode) {
-      throw new BadRequestException('Password or OTP code is required');
+      throw new UnprocessableEntityException('Password or OTP code is required');
     }
 
     const identifier = (dto.email ?? dto.phone)!.toLowerCase();
