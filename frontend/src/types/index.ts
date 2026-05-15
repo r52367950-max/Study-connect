@@ -4,7 +4,8 @@ export type UserRole = 'USER' | 'ADMIN'
 
 export interface User {
   id: string
-  email: string
+  email?: string | null
+  phone?: string | null
   username: string
   role: UserRole
   avatarUrl?: string | null
@@ -16,6 +17,51 @@ export interface User {
 export interface AuthResponse {
   user: User
   accessToken: string
+}
+
+export type OtpChannel = 'sms' | 'email'
+export type OtpPurpose = 'REGISTER' | 'LOGIN' | 'RESET'
+
+// ─── Onboarding profile ──────────────────────────────────────────────────────
+
+export type ProfileRole = 'TEACHER' | 'STUDENT'
+
+export interface SchoolSummary {
+  id: string
+  name: string
+  city: string
+}
+
+export interface Profile {
+  id: string
+  email: string | null
+  phone: string | null
+  username: string
+  profileRole: ProfileRole | null
+  displayName: string | null
+  school: SchoolSummary | null
+  schoolNameFreeText: string | null
+  city: string | null
+  stages: string[]
+  grades: string[]
+  subjects: string[]
+  viewedKinds: string[]
+  collaborativeOptIn: boolean
+  onboardedAt: string | null
+  gradesUpdatedAt: string | null
+}
+
+export interface UpdateProfilePayload {
+  profileRole?: ProfileRole
+  displayName?: string
+  schoolId?: string | null
+  schoolNameFreeText?: string | null
+  city?: string
+  stages?: string[]
+  grades?: string[]
+  subjects?: string[]
+  viewedKinds?: string[]
+  collaborativeOptIn?: boolean
 }
 
 // ─── Material ────────────────────────────────────────────────────────────────

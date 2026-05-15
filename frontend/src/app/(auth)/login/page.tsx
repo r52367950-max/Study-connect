@@ -1,29 +1,38 @@
 'use client'
 
-import { Suspense, useEffect } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
 import { BookOpen } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
-import { login } from '@/lib/api/auth'
+import { login, sendOtp, type LoginPayload } from '@/lib/api/auth'
+import { getMyProfile } from '@/lib/api/users'
 import { getErrorMessage } from '@/lib/api/client'
 import { useAuth } from '@/hooks/use-auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { OtpInput } from '@/components/auth/otp-input'
+import { useOtpCountdown } from '@/components/auth/use-otp-countdown'
+import {
+  EMAIL_RE,
+  PHONE_RE,
+  type IdentifierKind,
+  type CredentialMode,
+} from '@/components/auth/identifier'
 
-const schema = z.object({
-  email: z.string().email('请输入有效的邮箱地址'),
-  password: z.string().min(6, '密码至少 6 位'),
-})
-type FormValues = z.infer<typeof schema>
+function FallbackBox() {
+  return (
+    <div className="flex min-h-[calc(100vh-10rem)] items-center justify-center text-sm text-muted-foreground">
+      加载中…
+    </div>
+  )
+}
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="flex min-h-[calc(100vh-10rem)] items-center justify-center text-sm text-muted-foreground">加载中…</div>}>
+    <Suspense fallback={<FallbackBox />}>
       <LoginPageContent />
     </Suspense>
   )
@@ -33,31 +42,101 @@ function LoginPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { isLoggedIn, setAuth } = useAuth()
-  const redirect = searchParams.get('redirect') ?? '/materials'
+  const redirect = searchParams.get('redirect') ?? '/'
 
   useEffect(() => {
     if (isLoggedIn) router.replace(redirect)
   }, [isLoggedIn, redirect, router])
 
-  const { register, handleSubmit, formState: { errors }, setError } = useForm<FormValues>({
-    resolver: zodResolver(schema),
-  })
+  const [idKind, setIdKind] = useState<IdentifierKind>('email')
+  const [mode, setMode] = useState<CredentialMode>('password')
+  const [identifier, setIdentifier] = useState('')
+  const [password, setPassword] = useState('')
+  const [otpCode, setOtpCode] = useState('')
+  const [formError, setFormError] = useState<string | null>(null)
+  const [otpNotice, setOtpNotice] = useState<string | null>(null)
 
-  const { mutate, isPending } = useMutation({
-    mutationFn: login,
-    onSuccess: (data) => {
-      setAuth(data.user, data.accessToken)
-      router.replace(redirect)
+  const countdown = useOtpCountdown()
+
+  const identifierValid = idKind === 'email' ? EMAIL_RE.test(identifier) : PHONE_RE.test(identifier)
+
+  const sendOtpMutation = useMutation({
+    mutationFn: () =>
+      sendOtp({
+        channel: idKind === 'email' ? 'email' : 'sms',
+        ...(idKind === 'email' ? { email: identifier } : { phone: identifier }),
+        purpose: 'LOGIN',
+      }),
+    onSuccess: (res) => {
+      countdown.start(res.cooldownSeconds > 0 ? res.cooldownSeconds : 60)
+      setOtpNotice(`验证码已发送，${res.expiresInSeconds || 300} 秒内有效`)
+      setFormError(null)
     },
     onError: (err) => {
-      setError('root', { message: getErrorMessage(err) })
+      setFormError(getErrorMessage(err))
     },
   })
+
+  const loginMutation = useMutation({
+    mutationFn: (payload: LoginPayload) => login(payload),
+    onSuccess: async (data) => {
+      setAuth(data.user, data.accessToken)
+      let target = redirect
+      try {
+        const profile = await getMyProfile()
+        if (!profile.onboardedAt) target = '/onboarding'
+      } catch {
+        // If profile lookup fails, fall back to the requested redirect.
+      }
+      router.replace(target)
+    },
+    onError: (err) => {
+      setFormError(getErrorMessage(err))
+    },
+  })
+
+  const handleSendOtp = () => {
+    if (!identifierValid) {
+      setFormError(idKind === 'email' ? '请输入有效的邮箱地址' : '请输入有效的手机号')
+      return
+    }
+    sendOtpMutation.mutate()
+  }
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    setFormError(null)
+    if (!identifierValid) {
+      setFormError(idKind === 'email' ? '请输入有效的邮箱地址' : '请输入有效的手机号')
+      return
+    }
+    const idPart = idKind === 'email' ? { email: identifier } : { phone: identifier }
+    if (mode === 'password') {
+      if (password.length < 8) {
+        setFormError('密码至少 8 位')
+        return
+      }
+      loginMutation.mutate({ ...idPart, password })
+    } else {
+      if (otpCode.length !== 6) {
+        setFormError('请输入 6 位验证码')
+        return
+      }
+      loginMutation.mutate({ ...idPart, otpCode })
+    }
+  }
+
+  const switchIdKind = (next: IdentifierKind) => {
+    setIdKind(next)
+    setIdentifier('')
+    setOtpCode('')
+    setFormError(null)
+    setOtpNotice(null)
+  }
 
   return (
     <div className="flex min-h-[calc(100vh-10rem)] items-center justify-center">
       <div className="w-full max-w-sm space-y-6">
-        {/* Logo */}
         <div className="flex flex-col items-center gap-2 text-center">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-foreground">
             <BookOpen className="h-5 w-5 text-background" />
@@ -66,45 +145,89 @@ function LoginPageContent() {
           <p className="text-sm text-muted-foreground">登录您的 StudyConnect 账号</p>
         </div>
 
-        {/* Form */}
-        <form
-          onSubmit={handleSubmit((d) => mutate(d))}
-          className="space-y-4 rounded-xl border bg-card p-6 shadow-sm"
-        >
-          <div className="space-y-1.5">
-            <Label htmlFor="email">邮箱</Label>
-            <Input
-              id="email"
-              type="email"
-              autoComplete="email"
-              placeholder="you@example.com"
-              {...register('email')}
-            />
-            {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
-          </div>
+        <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border bg-card p-6 shadow-sm">
+          <Tabs value={idKind} onValueChange={(v) => switchIdKind(v as IdentifierKind)}>
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="email">邮箱登录</TabsTrigger>
+              <TabsTrigger value="phone">手机号登录</TabsTrigger>
+            </TabsList>
+          </Tabs>
 
           <div className="space-y-1.5">
-            <Label htmlFor="password">密码</Label>
+            <Label htmlFor="identifier">{idKind === 'email' ? '邮箱' : '手机号'}</Label>
             <Input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              placeholder="••••••••"
-              {...register('password')}
+              id="identifier"
+              type={idKind === 'email' ? 'email' : 'tel'}
+              inputMode={idKind === 'email' ? 'email' : 'tel'}
+              autoComplete={idKind === 'email' ? 'email' : 'tel'}
+              placeholder={idKind === 'email' ? 'you@example.com' : '13800000000'}
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
             />
-            {errors.password && (
-              <p className="text-xs text-destructive">{errors.password.message}</p>
-            )}
           </div>
 
-          {errors.root && (
-            <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {errors.root.message}
+          <div className="flex gap-1 text-xs">
+            <button
+              type="button"
+              onClick={() => setMode('password')}
+              className={mode === 'password' ? 'font-medium text-foreground' : 'text-muted-foreground'}
+            >
+              密码登录
+            </button>
+            <span className="text-muted-foreground">·</span>
+            <button
+              type="button"
+              onClick={() => setMode('otp')}
+              className={mode === 'otp' ? 'font-medium text-foreground' : 'text-muted-foreground'}
+            >
+              验证码登录
+            </button>
+          </div>
+
+          {mode === 'password' ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="password">密码</Label>
+              <Input
+                id="password"
+                type="password"
+                autoComplete="current-password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label>验证码</Label>
+              <div className="flex items-center gap-3">
+                <OtpInput value={otpCode} onChange={setOtpCode} length={6} />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-1"
+                disabled={countdown.active || sendOtpMutation.isPending || !identifierValid}
+                onClick={handleSendOtp}
+              >
+                {countdown.active
+                  ? `${countdown.remaining}s 后重发`
+                  : sendOtpMutation.isPending
+                    ? '发送中…'
+                    : '发送验证码'}
+              </Button>
+              {otpNotice && <p className="text-xs text-muted-foreground">{otpNotice}</p>}
             </div>
           )}
 
-          <Button type="submit" className="w-full" disabled={isPending}>
-            {isPending ? '登录中…' : '登录'}
+          {formError && (
+            <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {formError}
+            </div>
+          )}
+
+          <Button type="submit" className="w-full" disabled={loginMutation.isPending}>
+            {loginMutation.isPending ? '登录中…' : '登录'}
           </Button>
         </form>
 

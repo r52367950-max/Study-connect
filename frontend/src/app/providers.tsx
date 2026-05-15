@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from '@/components/ui/toaster'
 import { AuthBootstrap } from '@/components/shared/auth-bootstrap'
+import { OnboardingGate } from '@/components/shared/onboarding-gate'
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -22,6 +23,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthBootstrap />
+      <OnboardingGate />
       {children}
       <Toaster />
     </QueryClientProvider>

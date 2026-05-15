@@ -60,14 +60,7 @@ apiClient.interceptors.request.use(async (config) => {
   const accessToken = useAuthStore.getState().accessToken
 
   if (accessToken) {
-    if (typeof config.headers?.set === 'function') {
-      config.headers.set('Authorization', `Bearer ${accessToken}`)
-    } else {
-      config.headers = {
-        ...(config.headers ?? {}),
-        Authorization: `Bearer ${accessToken}`,
-      }
-    }
+    config.headers.set('Authorization', `Bearer ${accessToken}`)
   }
 
   if (!STATE_CHANGING_METHODS.has(method) || isCsrfBootstrapRequest(requestUrl)) {
@@ -75,14 +68,7 @@ apiClient.interceptors.request.use(async (config) => {
   }
 
   const token = await ensureCsrfToken()
-  if (typeof config.headers?.set === 'function') {
-    config.headers.set(CSRF_HEADER_NAME, token)
-  } else {
-    config.headers = {
-      ...(config.headers ?? {}),
-      [CSRF_HEADER_NAME]: token,
-    }
-  }
+  config.headers.set(CSRF_HEADER_NAME, token)
   return config
 })
 
