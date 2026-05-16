@@ -133,6 +133,7 @@ function LoginPageContent() {
     setOtpCode('')
     setFormError(null)
     setOtpNotice(null)
+    countdown.reset()
   }
 
   return (

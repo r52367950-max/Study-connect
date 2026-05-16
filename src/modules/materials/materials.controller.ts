@@ -9,6 +9,7 @@ import {
   Post,
   Query,
   Req,
+  PayloadTooLargeException,
   UnprocessableEntityException,
   UploadedFile,
   UseInterceptors,
@@ -190,13 +191,20 @@ export class MaterialsController {
   ): Promise<UploadedMaterial> {
     const maxUploadSizeMb = getMaxUploadSizeMb(process.env[MAX_UPLOAD_SIZE_MB_KEY]);
 
-    assertUploadFileSize(file, maxUploadSizeMb);
+    try {
+      assertUploadFileSize(file, maxUploadSizeMb);
 
-    return this.materialsService.createWithFile({
-      uploaderId: req.user.id,
-      dto,
-      file,
-    });
+      return this.materialsService.createWithFile({
+        uploaderId: req.user.id,
+        dto,
+        file,
+      });
+    } catch (error) {
+      if (error instanceof PayloadTooLargeException) {
+        throw new UnprocessableEntityException('File exceeds size limit');
+      }
+      throw error;
+    }
   }
 }
 

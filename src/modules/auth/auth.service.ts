@@ -127,16 +127,8 @@ export class AuthService {
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
-
-    // Wrap in OR so legacy PrismaServiceMock implementations (which only know
-    // the OR signature from the original email/username register flow) keep
-    // working. A single-key {email} or {phone} predicate would crash them.
     const user = await this.prisma.user.findFirst({
-      where: {
-        OR: [
-          dto.email ? { email: identifier } : { phone: identifier },
-        ],
-      },
+      where: dto.email ? { email: identifier } : { phone: identifier },
     });
 
     const userStatus = user?.status ?? UserStatus.ACTIVE;
