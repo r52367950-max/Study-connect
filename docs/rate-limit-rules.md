@@ -24,6 +24,7 @@
 | `POST /auth/login` | `auth-login-ip-email` | 20 / 60s（默认） | 登录 IP+邮箱组合限流（可 env 覆盖） |
 | `POST /auth/login` | `auth-login-lock` | 5 次失败后锁定 5 分钟（默认） | 登录失败熔断锁 |
 | `POST /auth/logout` | `auth-logout` | 40 / 60s | 限制登出洪泛 |
+| `POST /auth/change-password` | `auth-change-password` | 5 / 60s | 限制高成本密码校验被持续打满 |
 | `POST /materials` | `materials-upload` | 10 / 60s | 上传接口保护 |
 | `POST /materials/:id/ratings` | `materials-rating-write` | 20 / 60s | 评分写入接口 |
 | `GET /materials/:id/download` | `materials-download` | 90 / 60s | 下载接口保护 |

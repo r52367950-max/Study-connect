@@ -35,6 +35,10 @@ export class UsersService {
     if (dto.viewedKinds !== undefined) data.viewedKinds = dto.viewedKinds;
     if (dto.collaborativeOptIn !== undefined) data.collaborativeOptIn = dto.collaborativeOptIn;
 
+    /**
+     * School field precedence in one request: `schoolId` (including explicit null) wins over
+     * `schoolNameFreeText`; only when `schoolId` is omitted do we apply `schoolNameFreeText`.
+     */
     if (dto.schoolId !== undefined) {
       if (dto.schoolId) {
         const school = await this.prisma.school.findUnique({ where: { id: dto.schoolId } });
@@ -46,8 +50,7 @@ export class UsersService {
       } else {
         data.school = { disconnect: true };
       }
-    }
-    if (dto.schoolNameFreeText !== undefined) {
+    } else if (dto.schoolNameFreeText !== undefined) {
       data.schoolNameFreeText = dto.schoolNameFreeText ?? null;
       if (dto.schoolNameFreeText) {
         data.school = { disconnect: true };
@@ -112,7 +115,7 @@ export class UsersService {
     const profileRole = dto.profileRole ?? existing.profileRole;
     const displayName = dto.displayName ?? existing.displayName;
     const city = dto.city ?? existing.city;
-    const schoolId = dto.schoolId ?? existing.schoolId;
+    const schoolId = dto.schoolId !== undefined ? dto.schoolId : existing.schoolId;
     const stages = dto.stages ?? existing.stages;
     const grades = dto.grades ?? existing.grades;
     const subjects = dto.subjects ?? existing.subjects;

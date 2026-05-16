@@ -1,9 +1,8 @@
-import { Controller, Delete, Get, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Controller, Delete, Get, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { Request } from 'express';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
 import { RateLimit } from '../../common/rate-limit.decorator';
 import { FavoritesQueryDto } from './dto/favorites-query.dto';
 import { FavoritesService } from './favorites.service';
@@ -11,7 +10,6 @@ import { FavoritesService } from './favorites.service';
 @ApiTags('favorites')
 @ApiBearerAuth()
 @Controller('favorites')
-@UseGuards(RolesGuard)
 @Roles(UserRole.USER, UserRole.ADMIN)
 export class FavoritesController {
   constructor(private readonly favoritesService: FavoritesService) {}
