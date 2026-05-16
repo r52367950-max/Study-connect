@@ -103,6 +103,69 @@ export class MaterialsService {
     const where = this.buildApprovedWhere(query);
     const orderBy = this.buildOrderBy(sort, Boolean(query.q));
 
+    if (query.q && query.q.trim() && sort !== MaterialSort.RATING) {
+      const q = query.q.trim();
+      const rows = await this.prisma.$queryRaw<Array<{
+        id: string;
+        title: string;
+        description: string | null;
+        stage: string | null;
+        grade: string | null;
+        subject: string | null;
+        year: number | null;
+        region: string | null;
+        visibility: MaterialVisibility;
+        createdAt: Date;
+        downloadCount: bigint;
+        totalCount: bigint;
+      }>>(Prisma.sql`
+        SELECT
+          m.id, m.title, m.description, m.stage, m.grade, m.subject, m.year, m.region,
+          m.visibility, m.created_at AS "createdAt",
+          COUNT(d.id)::bigint AS "downloadCount",
+          COUNT(*) OVER()::bigint AS "totalCount"
+        FROM materials m
+        LEFT JOIN downloads d ON d.material_id = m.id
+        WHERE m.status = 'APPROVED'
+          AND m.visibility = 'PUBLIC'
+          AND (m.file_safety_status = 'PASSED' OR m.file_safety_status IS NULL)
+          AND (${query.subject ?? null}::text IS NULL OR m.subject = ${query.subject})
+          AND (${query.stage ?? null}::text IS NULL OR m.stage = ${query.stage})
+          AND (${query.grade ?? null}::text IS NULL OR m.grade = ${query.grade})
+          AND (${query.region ?? null}::text IS NULL OR m.region = ${query.region})
+          AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
+          AND (similarity(m.title, ${q}) > 0 OR similarity(COALESCE(m.description, ''), ${q}) > 0)
+        GROUP BY m.id
+        ORDER BY (similarity(m.title, ${q}) + similarity(COALESCE(m.description, ''), ${q})) DESC, m.created_at DESC
+        LIMIT ${pageSize} OFFSET ${skip}
+      `);
+      const total = rows[0] ? Number(rows[0].totalCount) : 0;
+      const materialIds = rows.map((item) => item.id);
+      const averages = materialIds.length
+        ? await this.prisma.rating.groupBy({ by: ['materialId'], where: { materialId: { in: materialIds } }, _avg: { score: true } })
+        : [];
+      const averageMap = new Map(averages.map((row) => [row.materialId, row._avg.score]));
+      return {
+        page,
+        pageSize,
+        total,
+        items: rows.map((item) => ({
+          id: item.id,
+          title: item.title,
+          description: item.description,
+          stage: item.stage,
+          grade: item.grade,
+          subject: item.subject,
+          year: item.year,
+          region: item.region,
+          visibility: item.visibility,
+          createdAt: item.createdAt,
+          avg_score: averageMap.get(item.id) ?? null,
+          download_count: Number(item.downloadCount),
+        })),
+      };
+    }
+
     if (sort === MaterialSort.RATING) {
       const allItems = await this.prisma.material.findMany({
         where,

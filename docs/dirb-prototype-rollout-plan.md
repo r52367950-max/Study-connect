@@ -252,7 +252,7 @@
 
 > 来源：同一审计的"已知改进项评估"。多数与阶段 4–6 自然耦合，按下表挂载。
 
-### P1 — 搜索：PostgreSQL FTS（不上 Elasticsearch）｜挂阶段 4
+### P1 — 搜索：PostgreSQL FTS（不上 Elasticsearch）｜挂阶段 4（已完成）
 现状：`search.module.ts` 空壳；`materials.searchApproved` 用 `name: { contains: q }`（`LIKE %q%`，全表扫、无相关性、无中文分词）。
 路线（托管 PG 友好）：① migration 加 `CREATE EXTENSION pg_trgm` + `materials.title`/`materials.description` 的 GIN trgm 索引（或 `search_vector tsvector` 生成列 + GIN）。② `searchApproved` 改 `$queryRaw`：`WHERE title % :q OR description % :q ORDER BY similarity(title,:q) DESC`（tsvector 路线用 `ts_rank`），结构化 `where` 保留。③ `SearchModule` 落地（"猜你想搜"、最近搜索）。④ 补一个像 `scripts/min-material-search-check.ts` 的回归脚本。
 迁 ES 触发条件（V1–V2 不可见）：跨实体搜索（materials+schools+users+paper-sets）+ 分面 + >10M 文档 + 高 QPS p99<50ms。自托管时可升级到 `zhparser` + `tsvector`。
@@ -320,3 +320,9 @@
 3. **学校 seed 规模**：全国中学约 3 万所，只 seed 热门城市 Top 50；其余靠"找不到我的学校"异步补全。
 4. **微信 OAuth 备案**：需已备案 ICP + 开放平台审核（约 7–15 工作日）；代码可先做完用 mock。
 5. **Puppeteer 体积**：镜像约 +300MB；可换 `playwright-core` + 共享 Chromium，或拆独立微服务。
+
+
+## 本地数据库依赖（搜索）
+
+- 需要 PostgreSQL 13+。
+- 需要启用 `pg_trgm` 扩展以支持 `similarity(...)` 与 GIN trgm 索引。

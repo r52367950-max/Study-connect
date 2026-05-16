@@ -7,6 +7,7 @@ const checks = [
   'test:min-material-upload',
   'test:min-admin-review',
   'test:min-material-search',
+  'test:min-search-fts',
   'test:min-material-download',
   'test:min-material-rating',
   'test:min-csrf-regression',
