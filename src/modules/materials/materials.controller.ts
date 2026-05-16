@@ -78,10 +78,11 @@ export class MaterialsController {
         viewedKinds: true,
         schoolId: true,
         collaborativeOptIn: true,
+        onboardedAt: true,
       },
     });
     if (!profile) {
-      return { items: [] };
+      return { items: [], phase: null };
     }
     const items = await this.recommendationsService.recommend(
       {
@@ -93,10 +94,11 @@ export class MaterialsController {
         viewedKinds: profile.viewedKinds,
         schoolId: profile.schoolId,
         collaborativeOptIn: profile.collaborativeOptIn,
+        onboardedAt: profile.onboardedAt,
       },
       { limit: query.limit, ranker: query.ranker },
     );
-    return { items };
+    return { items, phase: items[0]?.phase ?? null };
   }
 
   @Get(':id')
