@@ -1,6 +1,7 @@
 import { Module, Provider, Type } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { LoggerModule } from 'nestjs-pino';
 import { RateLimitGuard } from './common/rate-limit.guard';
 import { RateLimitModule } from './common/rate-limit.module';
 import { CsrfGuard } from './common/security/csrf.guard';
@@ -18,6 +19,7 @@ import { SchoolsModule } from './modules/schools/schools.module';
 import { SearchModule } from './modules/search/search.module';
 import { UsersModule } from './modules/users/users.module';
 import { ViewEventsModule } from './modules/view-events/view-events.module';
+import { HealthModule } from './modules/health/health.module';
 
 export const APP_GUARD_CHAIN = [RateLimitGuard, CsrfGuard, JwtAuthGuard, RolesGuard] as const;
 
@@ -28,6 +30,25 @@ const appGuardProviders: Provider[] = APP_GUARD_CHAIN.map((guardClass: Type<unkn
 
 @Module({
   imports: [
+    LoggerModule.forRoot({
+      pinoHttp: {
+        level: process.env.LOG_LEVEL ?? (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
+        transport: process.env.NODE_ENV !== 'production' ? { target: 'pino-pretty' } : undefined,
+        redact: {
+          paths: [
+            'req.headers.authorization',
+            'req.headers.cookie',
+            'res.headers["set-cookie"]',
+            '*.password', '*.passwordHash', '*.codeHash',
+            '*.token', '*.accessToken', '*.refreshToken',
+          ],
+          censor: '[REDACTED]',
+        },
+        autoLogging: true,
+        genReqId: (req: any) => req.headers['x-request-id'] ?? require('crypto').randomUUID(),
+        customProps: (req: any) => ({ reqId: req.id }),
+      },
+    }),
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['.env.local', '.env'],
@@ -45,6 +66,7 @@ const appGuardProviders: Provider[] = APP_GUARD_CHAIN.map((guardClass: Type<unkn
     ReviewsModule,
     DownloadsModule,
     SearchModule,
+    HealthModule,
   ],
   providers: appGuardProviders,
 })

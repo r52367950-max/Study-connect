@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../infra';
 import { GRADES, STAGES, SUBJECTS, UpdateProfileDto, VIEWED_KINDS } from './dto/update-profile.dto';
 import { ProfileResponseDto } from './dto/profile.dto';
+import { stripControlChars } from '../materials/upload-security.util';
 
 @Injectable()
 export class UsersService {
@@ -24,8 +25,8 @@ export class UsersService {
 
     const data: Prisma.UserUpdateInput = {};
     if (dto.profileRole !== undefined) data.profileRole = dto.profileRole;
-    if (dto.displayName !== undefined) data.displayName = dto.displayName ?? null;
-    if (dto.city !== undefined) data.city = dto.city;
+    if (dto.displayName !== undefined) data.displayName = dto.displayName ? stripControlChars(dto.displayName) : null;
+    if (dto.city !== undefined) data.city = dto.city ? stripControlChars(dto.city) : dto.city;
     if (dto.stages !== undefined) data.stages = dto.stages;
     if (dto.grades !== undefined) {
       data.grades = dto.grades;
@@ -51,7 +52,7 @@ export class UsersService {
         data.school = { disconnect: true };
       }
     } else if (dto.schoolNameFreeText !== undefined) {
-      data.schoolNameFreeText = dto.schoolNameFreeText ?? null;
+      data.schoolNameFreeText = dto.schoolNameFreeText ? stripControlChars(dto.schoolNameFreeText) : null;
       if (dto.schoolNameFreeText) {
         data.school = { disconnect: true };
       }

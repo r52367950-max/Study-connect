@@ -44,7 +44,7 @@
 - 脚本：`npm run test:min-rate-limit`
 - 必须同时满足：
   - HTTP 响应断言：三条链路均命中 `429`
-  - 日志断言：必须出现 `event=rate_limit_blocked` 且匹配对应路由/规则
+  - 日志断言：必须出现 `"event":"rate_limit_blocked"` 且匹配对应路由/规则
 
 ### 三条链路对应证据
 1. 登录链路（`POST /auth/login`）
@@ -62,11 +62,12 @@
 npm run test:min-rate-limit | tee artifacts/rate-limit-429-evidence.log
 ```
 
-日志中必须出现以下关键行（示例）：
+日志中必须出现以下关键行（示例，JSON 证据格式）：
 - `login 429 check passed: 429`
 - `upload 429 check passed: 429`
 - `admin 429 check passed: 429`
 - `rate_limit_blocked log assertion passed: login/upload/admin`
+- `evidence marker: {"event":"rate_limit_blocked"}`
 
 > 任意一条缺失，视为证据链不完整，不可合并。
 

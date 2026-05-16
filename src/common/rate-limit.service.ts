@@ -129,8 +129,7 @@ export class RateLimitService {
     this.metrics.set(input.metricKey, (this.metrics.get(input.metricKey) ?? 0) + 1);
     this.metrics.set('rate_limit.hits.total', (this.metrics.get('rate_limit.hits.total') ?? 0) + 1);
 
-    this.logger.warn(
-      JSON.stringify({
+    this.logger.warn({
         event: 'rate_limit_blocked',
         ts: new Date().toISOString(),
         rule: input.rule,
@@ -139,16 +138,13 @@ export class RateLimitService {
         method: input.method,
         ip: input.ip,
         retryAfterMs: input.retryAfterMs,
-      }),
-    );
+      });
 
-    this.logger.log(
-      JSON.stringify({
+    this.logger.log({
         event: 'rate_limit_metric',
         ts: new Date().toISOString(),
         metric: input.metricKey,
         value: this.metrics.get(input.metricKey),
-      }),
-    );
+      });
   }
 }
