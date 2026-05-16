@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import {
   ArgumentsHost,
   Catch,
@@ -20,12 +21,19 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const request = ctx.getRequest<Request>();
 
     const isHttpException = exception instanceof HttpException;
-    const status = isHttpException
+    let status = isHttpException
       ? exception.getStatus()
       : HttpStatus.INTERNAL_SERVER_ERROR;
+    let overrideMessage: string | null = null;
+
+    if (isHttpException && exception.getStatus() === HttpStatus.PAYLOAD_TOO_LARGE) {
+      status = HttpStatus.UNPROCESSABLE_ENTITY;
+      overrideMessage = 'File exceeds size limit';
+    }
 
     if (!isHttpException) {
-      this.logger.error('Unhandled exception', exception as Error);
+      this.logger.error({ event: 'UNHANDLED_EXCEPTION', url: request.url, method: request.method, exception });
+      Sentry.captureException(exception, { extra: { url: request.url, method: request.method } });
     }
 
     if (this.isProduction && status >= HttpStatus.INTERNAL_SERVER_ERROR) {
@@ -39,6 +47,16 @@ export class HttpExceptionFilter implements ExceptionFilter {
     }
 
     if (isHttpException) {
+      if (overrideMessage) {
+        response.status(status).json({
+          statusCode: status,
+          message: overrideMessage,
+          timestamp: new Date().toISOString(),
+          path: request.url,
+        });
+        return;
+      }
+
       const payload = exception.getResponse();
       response.status(status).json(
         typeof payload === 'string'

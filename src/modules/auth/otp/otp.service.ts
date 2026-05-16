@@ -65,7 +65,7 @@ export class OtpService {
     });
 
     try {
-      this.logger.log(JSON.stringify({ event: 'OTP_SEND_ATTEMPT', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) }));
+      this.logger.log({ event: 'OTP_SEND_ATTEMPT', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) });
       if (input.channel === OtpChannel.SMS) {
         await this.smsProvider.send(input.identifier, code);
       } else {
@@ -81,7 +81,7 @@ export class OtpService {
       throw new HttpException('Failed to dispatch OTP', HttpStatus.BAD_GATEWAY);
     }
 
-    this.logger.log(JSON.stringify({ event: 'OTP_SEND_SUCCESS', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) }));
+    this.logger.log({ event: 'OTP_SEND_SUCCESS', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) });
 
     return {
       cooldownSeconds: Math.ceil(RESEND_COOLDOWN_MS / 1000),
@@ -121,7 +121,7 @@ export class OtpService {
 
     if (!attempt || !this.codesEqual(attempt.codeHash, input.code)) {
       await this.recordVerifyFailure(input.channel, input.identifier, input.purpose);
-      this.logger.warn(JSON.stringify({ event: 'OTP_VERIFY_FAILED', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) }));
+      this.logger.warn({ event: 'OTP_VERIFY_FAILED', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) });
       throw new UnauthorizedException('Invalid or expired OTP');
     }
 
@@ -130,7 +130,7 @@ export class OtpService {
       data: { consumedAt: now },
     });
 
-    this.logger.log(JSON.stringify({ event: 'OTP_VERIFY_SUCCESS', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) }));
+    this.logger.log({ event: 'OTP_VERIFY_SUCCESS', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) });
   }
 
 
@@ -148,12 +148,12 @@ export class OtpService {
 
     if (count >= cap) {
       this.logger.warn(
-        JSON.stringify({
+        {
           event: 'OTP_DAILY_CAP_REACHED',
           identifier: maskIdentifier(identifier),
           cap,
           count,
-        }),
+        },
       );
       throw new HttpException('OTP daily cap reached', HttpStatus.TOO_MANY_REQUESTS);
     }
@@ -231,7 +231,7 @@ export class OtpService {
       },
     });
     if (count >= IP_MAX) {
-      this.logger.warn(JSON.stringify({ event: 'OTP_IP_RATE_LIMITED', ip, count, windowMs: IP_WINDOW_MS }));
+      this.logger.warn({ event: 'OTP_IP_RATE_LIMITED', ip, count, windowMs: IP_WINDOW_MS });
       throw new HttpException('Too many OTP requests from this IP, slow down', HttpStatus.TOO_MANY_REQUESTS);
     }
   }

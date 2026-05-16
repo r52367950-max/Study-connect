@@ -1,4 +1,5 @@
-import { HttpStatus, ValidationPipe } from '@nestjs/common';
+import * as Sentry from '@sentry/node';
+import { HttpStatus, Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Request, Response, NextFunction } from 'express';
@@ -11,12 +12,25 @@ import {
 } from './common/security/cors-config';
 import { assertSecretStrength } from './common/security/secret-strength';
 
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN ?? undefined,
+    environment: process.env.NODE_ENV ?? 'development',
+    release: process.env.GIT_SHA ?? undefined,
+    tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? '0.05'),
+    beforeSend(event) {
+      if (event.user) { delete (event.user as any).email; delete (event.user as any).phone; }
+      return event;
+    },
+  });
+}
 
 async function bootstrap() {
   assertSecretStrength('JWT_SECRET', process.env.JWT_SECRET);
   assertSecretStrength('OTP_SECRET', process.env.OTP_SECRET ?? process.env.JWT_SECRET);
 
   const app = await NestFactory.create(AppModule);
+  app.useLogger(app.get(Logger));
   const isProduction = process.env.NODE_ENV === 'production';
 
   const trustProxy = process.env.TRUST_PROXY;
@@ -29,7 +43,7 @@ async function bootstrap() {
   }
 
   if (process.env.AUTH_OTP_TEST_BYPASS === 'true') {
-    console.warn('OTP test bypass is ACTIVE');
+    app.get(Logger).warn('OTP test bypass is ACTIVE');
   }
 
   app.use(applySecurityHeaders);
