@@ -30,9 +30,8 @@ export class AliyunSmsProvider implements SmsProvider {
     // TS resolution target during build / ts-node compilation.
     const optionalRequire = (name: string): unknown => {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-implied-eval
-        const req = eval('require') as NodeRequire;
-        return req(name);
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        return require(name);
       } catch {
         return null;
       }
