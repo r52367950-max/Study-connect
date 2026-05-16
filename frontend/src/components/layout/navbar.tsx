@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { cn } from '@/lib/utils'
+import { identifierLabel } from '@/lib/user-display'
 
 const navLinks = [
   { href: '/materials', label: '资料库' },
@@ -24,6 +25,7 @@ export function Navbar() {
   const { isLoggedIn, isAdmin, user, logout } = useAuth()
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const userIdentifier = user ? identifierLabel(user) : ''
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-border/60 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -77,7 +79,9 @@ export function Navbar() {
                 <DropdownMenuContent align="end" className="w-48">
                   <div className="px-2 py-1.5">
                     <p className="text-sm font-medium">{user?.username}</p>
-                    <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+                    {userIdentifier ? (
+                      <p className="text-xs text-muted-foreground truncate">{userIdentifier}</p>
+                    ) : null}
                   </div>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>

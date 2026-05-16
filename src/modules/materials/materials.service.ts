@@ -47,7 +47,9 @@ export class MaterialsService {
 
     await this.minioService.uploadObject(key, params.file.buffer, params.file.mimetype);
 
-    const material = await this.prisma.material.create({
+    let material;
+    try {
+      material = await this.prisma.material.create({
       data: {
         title: params.dto.title,
         description: params.dto.description,
@@ -78,7 +80,13 @@ export class MaterialsService {
         createdAt: true,
         fileSafetyStatus: true,
       },
-    });
+      });
+    } catch (err) {
+      await this.minioService.deleteObject(key).catch(() => {
+        this.logger.error({ event: 'orphan_cleanup_failed', fileKey: key });
+      });
+      throw err;
+    }
 
     this.fileScanService.enqueueScan(material.id, params.file);
 
@@ -271,7 +279,7 @@ export class MaterialsService {
   }
 
   async upsertMaterialRating(params: { materialId: string; userId: string; dto: CreateRatingDto }) {
-    await this.ensureApprovedMaterial(params.materialId);
+    await this.ensurePublicApprovedMaterial(params.materialId);
 
     const rating = await this.prisma.rating.upsert({
       where: {
@@ -321,7 +329,7 @@ export class MaterialsService {
   }
 
   async listApprovedMaterialRatings(materialId: string, query: MaterialRatingsQueryDto) {
-    await this.ensureApprovedMaterial(materialId);
+    await this.ensurePublicApprovedMaterial(materialId);
 
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 10;

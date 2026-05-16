@@ -112,12 +112,13 @@ export class RateLimitGuard implements CanActivate {
   }
 
   private extractIp(request: Request): string {
-    const xff = request.headers['x-forwarded-for'];
-    if (typeof xff === 'string' && xff.trim().length > 0) {
-      return xff.split(',')[0].trim();
+    // Only honor X-Forwarded-For when Express thinks we're behind a trusted proxy.
+    const app = request.app as { get?: (key: string) => unknown } | undefined;
+    const trustProxyEnabled = Boolean(app?.get?.('trust proxy'));
+    if (trustProxyEnabled) {
+      return request.ip || request.socket.remoteAddress || 'unknown';
     }
-
-    return request.ip || request.socket.remoteAddress || 'unknown';
+    return request.socket.remoteAddress || 'unknown';
   }
 
   private extractIdentifier(request: Request): string | null {

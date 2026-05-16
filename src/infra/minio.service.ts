@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { createHash, createHmac } from 'crypto';
 
 type SignedRequestOptions = {
-  method: 'PUT' | 'HEAD';
+  method: 'PUT' | 'HEAD' | 'DELETE';
   canonicalUri: string;
   payload?: Buffer;
   contentType?: string;
@@ -45,6 +45,17 @@ export class MinioService {
     });
 
     return `${this.bucket}/${key}`;
+  }
+
+  async deleteObject(key: string): Promise<void> {
+    const response = await this.signedRequest({
+      method: 'DELETE',
+      canonicalUri: `/${this.bucket}/${this.encodePath(key)}` ,
+    });
+
+    if (!response.ok && response.status !== 404) {
+      throw new InternalServerErrorException('Failed to delete object from MinIO');
+    }
   }
 
   getObjectUrl(key: string): string {

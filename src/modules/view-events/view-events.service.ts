@@ -7,8 +7,8 @@ export class ViewEventsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async log(userId: string, dto: LogViewEventDto) {
-    const material = await this.prisma.material.findUnique({
-      where: { id: dto.materialId },
+    const material = await this.prisma.material.findFirst({
+      where: { id: dto.materialId, status: 'APPROVED', visibility: 'PUBLIC' },
       select: { id: true, kind: true },
     });
     if (!material) return { logged: false };

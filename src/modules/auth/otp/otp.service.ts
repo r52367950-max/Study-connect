@@ -31,6 +31,7 @@ export class OtpService {
   private readonly logger = new Logger(OtpService.name);
   private readonly ipBuckets = new Map<string, { count: number; resetAt: number }>();
   private readonly verifyAttempts = new Map<string, { count: number; resetAt: number }>();
+  private readonly dailyCounts = new Map<string, { count: number; resetAt: number }>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -47,6 +48,7 @@ export class OtpService {
   }): Promise<{ cooldownSeconds: number; expiresInSeconds: number }> {
     this.enforceIpLimit(input.ip);
     await this.enforceResendCooldown(input.identifier, input.purpose);
+    this.assertDailyCapAvailable(input.identifier);
 
     const code = this.generateCode();
     const codeHash = this.hashCode(code);
@@ -123,6 +125,25 @@ export class OtpService {
       where: { id: attempt.id },
       data: { consumedAt: now },
     });
+  }
+
+
+  private assertDailyCapAvailable(identifier: string): void {
+    const rawCap = Number(process.env.OTP_DAILY_CAP ?? 10);
+    const cap = Number.isFinite(rawCap) && rawCap > 0 ? rawCap : 10;
+    const now = Date.now();
+    const key = identifier;
+    const bucket = this.dailyCounts.get(key);
+
+    if (bucket && now < bucket.resetAt) {
+      if (bucket.count >= cap) {
+        throw new HttpException('OTP daily cap reached', HttpStatus.TOO_MANY_REQUESTS);
+      }
+      bucket.count += 1;
+      return;
+    }
+
+    this.dailyCounts.set(key, { count: 1, resetAt: now + 24 * 60 * 60 * 1000 });
   }
 
   private assertVerifyAttemptsRemaining(key: string): void {

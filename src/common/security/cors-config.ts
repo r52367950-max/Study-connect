@@ -29,8 +29,22 @@ export function assertCorsConfigInProduction(
   allowedOrigins: string[],
   isProduction: boolean,
 ): void {
-  if (isProduction && allowedOrigins.length === 0) {
+  if (!isProduction) {
+    return;
+  }
+
+  if (allowedOrigins.length === 0) {
     throw new Error('CORS_ORIGIN must be explicitly configured in production');
+  }
+
+  if (process.env.AUTH_COOKIE_SECURE !== 'true') {
+    throw new Error('AUTH_COOKIE_SECURE must be true in production');
+  }
+
+  for (const origin of allowedOrigins) {
+    if (!origin.startsWith('https://')) {
+      throw new Error(`CORS_ORIGIN must use https in production: ${origin}`);
+    }
   }
 }
 
