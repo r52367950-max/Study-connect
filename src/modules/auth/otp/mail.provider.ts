@@ -28,9 +28,8 @@ export class SmtpMailProvider implements MailProvider {
   async send(email: string, code: string): Promise<void> {
     const optionalRequire = (name: string): unknown => {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-implied-eval
-        const req = eval('require') as NodeRequire;
-        return req(name);
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        return require(name);
       } catch {
         return null;
       }
