@@ -225,5 +225,8 @@ model OtpAttempt {
   createdAt  DateTime   @default(now()) @map("created_at")
 
   @@index([identifier, purpose, createdAt])
+  @@index([identifier, channel, purpose, createdAt])
+  @@index([ip, createdAt])
+  @@index([identifier, createdAt])
   @@map("otp_attempts")
 }
