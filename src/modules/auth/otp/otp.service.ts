@@ -25,6 +25,7 @@ const CODE_LENGTH = 6;
 // Cap failed verification attempts so a 6-digit code (1e6 space) cannot be
 // brute-forced within its TTL. Window is the same as the code TTL.
 const VERIFY_MAX_ATTEMPTS = 5;
+const FAILURE_SENTINEL = '__invalid__';
 
 @Injectable()
 export class OtpService {
@@ -54,7 +55,7 @@ export class OtpService {
     const codeHash = this.hashCode(code);
     const expiresAt = new Date(Date.now() + TTL_MS);
 
-    await this.prisma.otpAttempt.create({
+    const createdAttempt = await this.prisma.otpAttempt.create({
       data: {
         identifier: input.identifier,
         channel: input.channel,
@@ -63,6 +64,7 @@ export class OtpService {
         expiresAt,
         ip: input.ip ?? null,
       },
+      select: { id: true },
     });
 
     try {
@@ -72,6 +74,9 @@ export class OtpService {
         await this.mailProvider.send(input.identifier, code);
       }
     } catch (err) {
+      await this.prisma.otpAttempt
+        .delete({ where: { id: createdAttempt.id } })
+        .catch(() => undefined);
       this.logger.error(
         `failed to dispatch OTP via ${input.channel} for ${maskIdentifier(input.identifier)}: ${(err as Error).message}`,
       );
@@ -131,9 +136,14 @@ export class OtpService {
   private assertDailyCapAvailable(identifier: string): void {
     const rawCap = Number(process.env.OTP_DAILY_CAP ?? 10);
     const cap = Number.isFinite(rawCap) && rawCap > 0 ? rawCap : 10;
-    const now = Date.now();
-    const key = identifier;
-    const bucket = this.dailyCounts.get(key);
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const count = await this.prisma.otpAttempt.count({
+      where: {
+        identifier,
+        codeHash: { not: this.failureHash() },
+        createdAt: { gt: dayAgo },
+      },
+    });
 
     if (bucket && now < bucket.resetAt) {
       if (bucket.count >= cap) {
@@ -143,8 +153,21 @@ export class OtpService {
       return;
     }
 
-    this.dailyCounts.set(key, { count: 1, resetAt: now + 24 * 60 * 60 * 1000 });
-  }
+  private async assertVerifyAttemptsRemaining(
+    channel: OtpChannel,
+    identifier: string,
+    purpose: OtpPurpose,
+  ): Promise<void> {
+    const ttlAgo = new Date(Date.now() - TTL_MS);
+    const count = await this.prisma.otpAttempt.count({
+      where: {
+        channel,
+        identifier,
+        purpose,
+        codeHash: this.failureHash(),
+        createdAt: { gt: ttlAgo },
+      },
+    });
 
   private assertVerifyAttemptsRemaining(key: string): void {
     const bucket = this.verifyAttempts.get(key);
@@ -156,14 +179,22 @@ export class OtpService {
     }
   }
 
-  private recordVerifyFailure(key: string): void {
-    const now = Date.now();
-    const bucket = this.verifyAttempts.get(key);
-    if (!bucket || bucket.resetAt <= now) {
-      this.verifyAttempts.set(key, { count: 1, resetAt: now + TTL_MS });
-      return;
-    }
-    bucket.count += 1;
+  private async recordVerifyFailure(
+    channel: OtpChannel,
+    identifier: string,
+    purpose: OtpPurpose,
+  ): Promise<void> {
+    const now = new Date();
+    await this.prisma.otpAttempt.create({
+      data: {
+        channel,
+        identifier,
+        purpose,
+        codeHash: this.failureHash(),
+        expiresAt: now,
+        consumedAt: now,
+      },
+    });
   }
 
   private async enforceResendCooldown(identifier: string, purpose: OtpPurpose): Promise<void> {
@@ -171,6 +202,7 @@ export class OtpService {
       where: {
         identifier,
         purpose,
+        codeHash: { not: this.failureHash() },
         createdAt: { gt: new Date(Date.now() - RESEND_COOLDOWN_MS) },
       },
       orderBy: { createdAt: 'desc' },
@@ -212,6 +244,10 @@ export class OtpService {
 
   private hashCode(code: string): string {
     return createHmac('sha256', this.secret()).update(code).digest('hex');
+  }
+
+  private failureHash(): string {
+    return this.hashCode(FAILURE_SENTINEL);
   }
 
   private codesEqual(stored: string, candidate: string): boolean {
