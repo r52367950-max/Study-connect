@@ -520,14 +520,12 @@ export class MaterialsService {
     });
 
     if (material.fileSafetyStatus !== FileSafetyStatus.PASSED) {
-      this.logger.warn(
-        JSON.stringify({
-          event: 'SECURITY_ALERT_DOWNLOAD_BLOCKED',
-          materialId,
-          fileSafetyStatus: material.fileSafetyStatus ?? null,
-          timestamp: new Date().toISOString(),
-        }),
-      );
+      this.logger.warn({
+        event: 'SECURITY_ALERT_DOWNLOAD_BLOCKED',
+        materialId,
+        fileSafetyStatus: material.fileSafetyStatus ?? null,
+        timestamp: new Date().toISOString(),
+      });
       throw new NotFoundException('Material not found');
     }
 

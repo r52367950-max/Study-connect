@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import {
   ArgumentsHost,
   Catch,
@@ -25,7 +26,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
       : HttpStatus.INTERNAL_SERVER_ERROR;
 
     if (!isHttpException) {
-      this.logger.error('Unhandled exception', exception as Error);
+      this.logger.error({ event: 'UNHANDLED_EXCEPTION', url: request.url, method: request.method, exception });
+      Sentry.captureException(exception, { extra: { url: request.url, method: request.method } });
     }
 
     if (this.isProduction && status >= HttpStatus.INTERNAL_SERVER_ERROR) {

@@ -63,9 +63,16 @@ export class RecommendationsService {
   ): Promise<RecommendationItem[]> {
     const limit = options.limit ?? DEFAULT_LIMIT;
     const ranker = options.ranker ?? DEFAULT_RANKER;
-    const viewEventCount = await this.prisma.viewEvent.count({ where: { userId: user.id } });
-    const dynamicViewedKinds = await this.getDynamicViewedKinds(user.id);
-    const phase = await this.pickStrategy(user, { viewEventCount });
+    const basePhase = this.pickBasePhase(user);
+    const viewEventCount =
+      basePhase === 'phase-0'
+        ? 0
+        : await this.prisma.viewEvent.count({ where: { userId: user.id } });
+    const phase = await this.pickStrategy(user, { viewEventCount, basePhase });
+    const dynamicViewedKinds =
+      phase === 'phase-2' || phase === 'phase-3'
+        ? await this.getDynamicViewedKinds(user.id)
+        : [];
 
     const materials = await this.prisma.material.findMany({
       where: {
@@ -112,13 +119,19 @@ export class RecommendationsService {
     return scored.slice(0, limit);
   }
 
-  async pickStrategy(user: RecommendUserProfile, signals: { viewEventCount: number }): Promise<RankerPhase> {
-    const noProfile = !user.onboardedAt || (user.stages.length === 0 && user.subjects.length === 0);
-    if (noProfile) return 'phase-0';
+  async pickStrategy(user: RecommendUserProfile, signals: { viewEventCount: number; basePhase?: RankerPhase }): Promise<RankerPhase> {
+    const basePhase = signals.basePhase ?? this.pickBasePhase(user);
+    if (basePhase === 'phase-0') return 'phase-0';
     if (signals.viewEventCount < VIEW_EVENT_PHASE2_MIN) return 'phase-1';
     if (!user.collaborativeOptIn || !user.schoolId) return 'phase-2';
     const schoolUserCount = await this.getSchoolOnboardedCount(user.schoolId);
     return schoolUserCount >= SCHOOL_DENSITY_MIN ? 'phase-3' : 'phase-2';
+  }
+
+  private pickBasePhase(user: RecommendUserProfile): RankerPhase {
+    return !user.onboardedAt || (user.stages.length === 0 && user.subjects.length === 0)
+      ? 'phase-0'
+      : 'phase-1';
   }
 
   private async getDynamicViewedKinds(userId: string): Promise<string[]> {

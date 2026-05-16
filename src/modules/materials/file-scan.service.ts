@@ -79,7 +79,7 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
             scheduledAt: new Date(),
           },
         });
-        this.logger.warn(`scan failed for ${job.materialId}: ${error instanceof Error ? error.message : String(error)}`);
+        this.logger.warn({ event: 'FILE_SCAN_FAILED', materialId: job.materialId, error: error instanceof Error ? error.message : String(error) });
       }
     }
   }
