@@ -27,7 +27,11 @@
     "test:min-material-upload-security-regression": "ts-node scripts/min-material-upload-security-regression-check.ts",
     "test:min-cors-config": "ts-node scripts/min-cors-config-check.ts",
     "test:min-auth-token-hardening": "ts-node scripts/min-auth-token-hardening-check.ts",
-    "test:min-recommendations": "ts-node scripts/min-recommendations-check.ts"
+    "test:min-recommendations": "ts-node scripts/min-recommendations-check.ts",
+    "cleanup:otp": "ts-node scripts/cleanup-otp-attempts.ts",
+    "test:min-file-scan-async": "ts-node scripts/min-file-scan-async-check.ts",
+    "test:min-recommend-tiering": "ts-node scripts/min-recommend-tiering-check.ts",
+    "test:min-search-fts": "ts-node scripts/min-search-fts-check.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
@@ -44,7 +48,12 @@
     "dotenv": "^16.4.7",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "nestjs-pino": "^4.4.1",
+    "pino-http": "^10.3.0",
+    "pino-pretty": "^13.1.2",
+    "@sentry/node": "^9.20.0",
+    "@nestjs/terminus": "^11.0.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.5",
@@ -61,5 +70,8 @@
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=22 <23"
   }
 }

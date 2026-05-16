@@ -43,3 +43,14 @@
 - 覆盖场景：`login`、`upload`、`admin`
 - 脚本：`npm run test:min-rate-limit`
 - CI 门禁：`npm run test:min-all` 已纳入 `test:min-rate-limit`
+
+
+## OtpAttempt 后台清理建议
+
+为避免 `OtpAttempt` 表中的历史记录无限增长，建议每天通过 cron 执行一次：
+
+```bash
+npm run cleanup:otp
+```
+
+该脚本会删除 7 天前的 `OtpAttempt` 记录（成功与失败都会清理）。后续如果接入 BullMQ，可改为 repeatable job 统一调度。

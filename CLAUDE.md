@@ -176,6 +176,7 @@ npm run quality:cold-start    # clean cache, CI=true lint (no interactive ESLint
   keep those exact log strings intact.**
 - `.github/workflows/frontend-quality-gate.yml` — triggers on `frontend/**`. Runs `quality:cold-start`
   then `quality:gate`.
+- Health check available at `GET /health`.
 
 ## Security gate (read before touching anything security-related)
 
