@@ -30,6 +30,9 @@ const FAILURE_SENTINEL = '__invalid__';
 @Injectable()
 export class OtpService {
   private readonly logger = new Logger(OtpService.name);
+  private readonly ipBuckets = new Map<string, { count: number; resetAt: number }>();
+  private readonly verifyAttempts = new Map<string, { count: number; resetAt: number }>();
+  private readonly dailyCounts = new Map<string, { count: number; resetAt: number }>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -44,9 +47,9 @@ export class OtpService {
     purpose: OtpPurpose;
     ip?: string;
   }): Promise<{ cooldownSeconds: number; expiresInSeconds: number }> {
-    await this.enforceIpLimit(input.ip);
+    this.enforceIpLimit(input.ip);
     await this.enforceResendCooldown(input.identifier, input.purpose);
-    await this.assertDailyCapAvailable(input.identifier);
+    this.assertDailyCapAvailable(input.identifier);
 
     const code = this.generateCode();
     const codeHash = this.hashCode(code);
@@ -65,7 +68,6 @@ export class OtpService {
     });
 
     try {
-      this.logger.log(JSON.stringify({ event: 'OTP_SEND_ATTEMPT', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) }));
       if (input.channel === OtpChannel.SMS) {
         await this.smsProvider.send(input.identifier, code);
       } else {
@@ -80,8 +82,6 @@ export class OtpService {
       );
       throw new HttpException('Failed to dispatch OTP', HttpStatus.BAD_GATEWAY);
     }
-
-    this.logger.log(JSON.stringify({ event: 'OTP_SEND_SUCCESS', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) }));
 
     return {
       cooldownSeconds: Math.ceil(RESEND_COOLDOWN_MS / 1000),
@@ -105,7 +105,8 @@ export class OtpService {
       return;
     }
 
-    await this.assertVerifyAttemptsRemaining(input.channel, input.identifier, input.purpose);
+    const verifyKey = `${input.channel}:${input.identifier}:${input.purpose}`;
+    this.assertVerifyAttemptsRemaining(verifyKey);
 
     const now = new Date();
     const attempt = await this.prisma.otpAttempt.findFirst({
@@ -120,21 +121,19 @@ export class OtpService {
     });
 
     if (!attempt || !this.codesEqual(attempt.codeHash, input.code)) {
-      await this.recordVerifyFailure(input.channel, input.identifier, input.purpose);
-      this.logger.warn(JSON.stringify({ event: 'OTP_VERIFY_FAILED', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) }));
+      this.recordVerifyFailure(verifyKey);
       throw new UnauthorizedException('Invalid or expired OTP');
     }
 
+    this.verifyAttempts.delete(verifyKey);
     await this.prisma.otpAttempt.update({
       where: { id: attempt.id },
       data: { consumedAt: now },
     });
-
-    this.logger.log(JSON.stringify({ event: 'OTP_VERIFY_SUCCESS', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) }));
   }
 
 
-  private async assertDailyCapAvailable(identifier: string): Promise<void> {
+  private assertDailyCapAvailable(identifier: string): void {
     const rawCap = Number(process.env.OTP_DAILY_CAP ?? 10);
     const cap = Number.isFinite(rawCap) && rawCap > 0 ? rawCap : 10;
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -146,18 +145,13 @@ export class OtpService {
       },
     });
 
-    if (count >= cap) {
-      this.logger.warn(
-        JSON.stringify({
-          event: 'OTP_DAILY_CAP_REACHED',
-          identifier: maskIdentifier(identifier),
-          cap,
-          count,
-        }),
-      );
-      throw new HttpException('OTP daily cap reached', HttpStatus.TOO_MANY_REQUESTS);
+    if (bucket && now < bucket.resetAt) {
+      if (bucket.count >= cap) {
+        throw new HttpException('OTP daily cap reached', HttpStatus.TOO_MANY_REQUESTS);
+      }
+      bucket.count += 1;
+      return;
     }
-  }
 
   private async assertVerifyAttemptsRemaining(
     channel: OtpChannel,
@@ -175,8 +169,13 @@ export class OtpService {
       },
     });
 
-    if (count >= VERIFY_MAX_ATTEMPTS) {
-      throw new HttpException('Too many incorrect codes; request a new one', HttpStatus.TOO_MANY_REQUESTS);
+  private assertVerifyAttemptsRemaining(key: string): void {
+    const bucket = this.verifyAttempts.get(key);
+    if (bucket && bucket.resetAt > Date.now() && bucket.count >= VERIFY_MAX_ATTEMPTS) {
+      throw new HttpException(
+        'Too many incorrect codes; request a new one',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
     }
   }
 
@@ -221,19 +220,21 @@ export class OtpService {
     }
   }
 
-  private async enforceIpLimit(ip?: string): Promise<void> {
+  private enforceIpLimit(ip?: string): void {
     if (!ip) return;
-    const windowStart = new Date(Date.now() - IP_WINDOW_MS);
-    const count = await this.prisma.otpAttempt.count({
-      where: {
-        ip,
-        createdAt: { gt: windowStart },
-      },
-    });
-    if (count >= IP_MAX) {
-      this.logger.warn(JSON.stringify({ event: 'OTP_IP_RATE_LIMITED', ip, count, windowMs: IP_WINDOW_MS }));
-      throw new HttpException('Too many OTP requests from this IP, slow down', HttpStatus.TOO_MANY_REQUESTS);
+    const now = Date.now();
+    const bucket = this.ipBuckets.get(ip);
+    if (!bucket || bucket.resetAt <= now) {
+      this.ipBuckets.set(ip, { count: 1, resetAt: now + IP_WINDOW_MS });
+      return;
     }
+    if (bucket.count >= IP_MAX) {
+      throw new HttpException(
+        'Too many OTP requests from this IP, slow down',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    bucket.count += 1;
   }
 
   private generateCode(): string {
