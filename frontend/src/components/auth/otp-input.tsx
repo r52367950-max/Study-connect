@@ -27,6 +27,7 @@ export function OtpInput({
   'aria-label': ariaLabel = '验证码',
 }: OtpInputProps) {
   const refs = React.useRef<Array<HTMLInputElement | null>>([])
+  const isComposingRef = React.useRef(false)
   const digits = React.useMemo(() => {
     const arr = value.replace(/\D/g, '').slice(0, length).split('')
     while (arr.length < length) arr.push('')
@@ -44,6 +45,7 @@ export function OtpInput({
   }
 
   const handleChange = (index: number, raw: string) => {
+    if (isComposingRef.current) return
     const onlyDigits = raw.replace(/\D/g, '')
     if (!onlyDigits) {
       setAt(index, '')
@@ -66,6 +68,7 @@ export function OtpInput({
   }
 
   const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (isComposingRef.current) return
     if (e.key === 'Backspace') {
       if (digits[index]) {
         setAt(index, '')
@@ -100,6 +103,13 @@ export function OtpInput({
           disabled={disabled}
           aria-label={`${ariaLabel} 第 ${index + 1} 位`}
           onChange={(e) => handleChange(index, e.target.value)}
+          onCompositionStart={() => {
+            isComposingRef.current = true
+          }}
+          onCompositionEnd={(e) => {
+            isComposingRef.current = false
+            handleChange(index, e.currentTarget.value)
+          }}
           onKeyDown={(e) => handleKeyDown(index, e)}
           onFocus={(e) => e.target.select()}
           className={cn(

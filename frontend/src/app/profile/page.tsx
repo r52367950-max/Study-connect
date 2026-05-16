@@ -17,6 +17,7 @@ import { MaterialCard } from '@/components/materials/material-card'
 import { EmptyState } from '@/components/shared/empty-state'
 import { PageLoader } from '@/components/shared/loading-spinner'
 import { formatDate } from '@/lib/utils'
+import { identifierLabel } from '@/lib/user-display'
 
 export default function ProfilePage() {
   const router = useRouter()
@@ -35,6 +36,7 @@ export default function ProfilePage() {
   if (!initialized || !isLoggedIn || !user) return <PageLoader />
 
   const currentUser = meData ?? user
+  const identifier = identifierLabel(currentUser)
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -54,7 +56,9 @@ export default function ProfilePage() {
                   <Badge variant="default" className="text-xs">管理员</Badge>
                 )}
               </div>
-              <p className="text-sm text-muted-foreground">{currentUser.email}</p>
+              {identifier ? (
+                <p className="text-sm text-muted-foreground">{identifier}</p>
+              ) : null}
               {currentUser.createdAt && (
                 <p className="text-xs text-muted-foreground mt-0.5">
                   加入于 {formatDate(currentUser.createdAt)}
