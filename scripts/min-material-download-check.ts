@@ -1,3 +1,4 @@
+import { FileSafetyStatus } from '@prisma/client';
 /// <reference path="../src/types/express.d.ts" />
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -28,7 +29,7 @@ type DbMaterial = {
   visibility: 'PUBLIC' | 'PRIVATE';
   status: MaterialStatus;
   reviewComment: string | null;
-  fileSafetyStatus: 'QUARANTINED' | 'SCANNING' | 'PASSED' | 'FAILED' | 'TIMEOUT' | null;
+  fileSafetyStatus: FileSafetyStatus | null;
   uploaderId: string;
   createdAt: Date;
   updatedAt: Date;
@@ -164,7 +165,7 @@ class PrismaServiceMock {
         visibility: 'PUBLIC',
         status: 'APPROVED',
         reviewComment: 'ok',
-        fileSafetyStatus: 'PASSED',
+        fileSafetyStatus: FileSafetyStatus.PASSED,
         uploaderId,
         createdAt: now,
         updatedAt: now,
@@ -182,7 +183,7 @@ class PrismaServiceMock {
         visibility: 'PRIVATE',
         status: 'APPROVED',
         reviewComment: 'ok',
-        fileSafetyStatus: 'PASSED',
+        fileSafetyStatus: FileSafetyStatus.PASSED,
         uploaderId,
         createdAt: now,
         updatedAt: now,
@@ -200,7 +201,7 @@ class PrismaServiceMock {
         visibility: 'PUBLIC',
         status: 'PENDING',
         reviewComment: null,
-        fileSafetyStatus: 'QUARANTINED',
+        fileSafetyStatus: FileSafetyStatus.QUARANTINED,
         uploaderId,
         createdAt: now,
         updatedAt: now,

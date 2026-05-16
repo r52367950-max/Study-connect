@@ -1,5 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Material, MaterialStatus, MaterialVisibility, Prisma } from '@prisma/client';
+import { FileSafetyStatus, Material, MaterialStatus, MaterialVisibility, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { MinioService, PrismaService } from '../../infra';
 import { CreateMaterialDto } from './dto/create-material.dto';
@@ -62,7 +62,7 @@ export class MaterialsService {
         status: MaterialStatus.PENDING,
         fileKey: key,
         uploaderId: params.uploaderId,
-        fileSafetyStatus: 'QUARANTINED',
+        fileSafetyStatus: FileSafetyStatus.QUARANTINED,
       },
       select: {
         id: true,
@@ -411,6 +411,7 @@ export class MaterialsService {
       where: {
         id: materialId,
         status: MaterialStatus.APPROVED,
+        fileSafetyStatus: FileSafetyStatus.PASSED,
       },
       select,
     });
@@ -433,6 +434,7 @@ export class MaterialsService {
         id: materialId,
         status: MaterialStatus.APPROVED,
         visibility: MaterialVisibility.PUBLIC,
+        fileSafetyStatus: FileSafetyStatus.PASSED,
       },
       select,
     });
@@ -453,12 +455,12 @@ export class MaterialsService {
       },
     });
 
-    if (material.fileSafetyStatus !== 'PASSED') {
+    if (material.fileSafetyStatus !== FileSafetyStatus.PASSED) {
       this.logger.warn(
         JSON.stringify({
           event: 'SECURITY_ALERT_DOWNLOAD_BLOCKED',
           materialId,
-          fileSafetyStatus: material.fileSafetyStatus ?? 'NULL',
+          fileSafetyStatus: material.fileSafetyStatus ?? null,
           timestamp: new Date().toISOString(),
         }),
       );

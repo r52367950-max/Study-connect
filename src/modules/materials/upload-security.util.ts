@@ -1,11 +1,12 @@
 import { UnprocessableEntityException } from '@nestjs/common';
+import { FileSafetyStatus } from '@prisma/client';
 import { extname } from 'path';
 import { UploadFileInput } from './file-upload.type';
 
 export const MAX_UPLOAD_SIZE_MB_KEY = 'MAX_UPLOAD_SIZE_MB';
 export const DEFAULT_MAX_UPLOAD_SIZE_MB = 50;
 
-export type UploadSecurityStatus = 'QUARANTINED' | 'SCANNING' | 'PASSED' | 'FAILED' | 'TIMEOUT';
+export type UploadSecurityStatus = FileSafetyStatus;
 
 type SupportedType = 'pdf' | 'docx' | 'pptx' | 'zip' | 'text';
 
@@ -81,7 +82,7 @@ export function assertUploadFileSecurity(file: UploadFileInput): UploadSecurityS
 
   assertMagicAndStructure(typeByMime, file.buffer);
 
-  return 'PASSED';
+  return FileSafetyStatus.PASSED;
 }
 
 function assertMagicAndStructure(type: SupportedType, payload: Buffer): void {

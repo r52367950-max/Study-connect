@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Req, Res } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -16,7 +16,6 @@ import { AuthResponseDto, AuthUserDto } from './dto/auth-response.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
-import { RolesGuard } from './guards/roles.guard';
 import { AuthService } from './auth.service';
 
 @ApiTags('auth')
@@ -154,6 +153,7 @@ export class AuthController {
   }
 
   @Post('change-password')
+  @RateLimit({ name: 'auth-change-password', limit: 5, windowMs: 60_000 })
   @ApiOperation({ summary: 'Change password and invalidate all active sessions' })
   @ApiOkResponse({
     schema: {
@@ -174,7 +174,6 @@ export class AuthController {
 
   @Get('me')
   @ApiBearerAuth()
-  @UseGuards(RolesGuard)
   @Roles(UserRole.USER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Get current user profile from JWT' })
   @ApiOkResponse({ type: AuthUserDto })

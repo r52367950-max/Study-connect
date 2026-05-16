@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { FileSafetyStatus } from '@prisma/client';
 import { PrismaService } from '../../infra';
 import { UploadFileInput } from './file-upload.type';
 import { assertUploadFileSecurity, UploadSecurityStatus } from './upload-security.util';
@@ -26,12 +27,12 @@ export class FileScanService {
   }
 
   private async runScan(materialId: string, file: UploadFileInput): Promise<void> {
-    await this.updateScanStatus(materialId, 'SCANNING');
+    await this.updateScanStatus(materialId, FileSafetyStatus.SCANNING);
 
     try {
       const status = await this.executeWithTimeout(async () => {
         assertUploadFileSecurity(file);
-        return 'PASSED' as const;
+        return FileSafetyStatus.PASSED;
       });
 
       await this.updateScanStatus(materialId, status);
@@ -41,7 +42,7 @@ export class FileScanService {
       });
     } catch (error) {
       const timeout = error instanceof Error && error.message === 'SCAN_TIMEOUT';
-      const status: UploadSecurityStatus = timeout ? 'TIMEOUT' : 'FAILED';
+      const status: UploadSecurityStatus = timeout ? FileSafetyStatus.TIMEOUT : FileSafetyStatus.FAILED;
 
       await this.updateScanStatus(materialId, status);
 

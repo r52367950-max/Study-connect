@@ -1,12 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AxiosError } from 'axios'
 import { apiClient } from '@/lib/api/client'
 import { useAuthStore } from '@/lib/auth-store'
 
 describe('api client 401 handling', () => {
   let capturedHref = ''
+  let originalLocation: Location
 
   beforeEach(() => {
+    originalLocation = window.location
     useAuthStore.setState({ user: { id: 'u1', email: 'u@e.com', username: 'u', role: 'USER' }, initialized: true })
     capturedHref = ''
     Object.defineProperty(window, 'location', {
@@ -20,6 +22,13 @@ describe('api client 401 handling', () => {
           capturedHref = v
         },
       },
+    })
+  })
+
+  afterEach(() => {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: originalLocation,
     })
   })
 

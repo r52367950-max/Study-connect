@@ -26,6 +26,7 @@
     "test:min-material-upload-size-boundary": "ts-node scripts/min-material-upload-size-boundary-check.ts",
     "test:min-material-upload-security-regression": "ts-node scripts/min-material-upload-security-regression-check.ts",
     "test:min-cors-config": "ts-node scripts/min-cors-config-check.ts",
+    "test:min-auth-token-hardening": "ts-node scripts/min-auth-token-hardening-check.ts",
     "test:min-recommendations": "ts-node scripts/min-recommendations-check.ts"
   },
   "prisma": {

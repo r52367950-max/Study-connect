@@ -39,6 +39,11 @@ jobs:
           mkdir -p artifacts
           npm run test:min-rate-limit | tee artifacts/rate-limit-429-evidence.log
 
+      - name: Run min-all checks
+        run: |
+          mkdir -p artifacts
+          npm run test:min-all | tee artifacts/min-all.log
+
       - name: Assert evidence lines
         run: |
           grep -F "login 429 check passed: 429" artifacts/rate-limit-429-evidence.log
@@ -50,5 +55,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rate-limit-429-evidence
-          path: artifacts/rate-limit-429-evidence.log
+          path: |
+            artifacts/rate-limit-429-evidence.log
+            artifacts/min-all.log
           if-no-files-found: error
