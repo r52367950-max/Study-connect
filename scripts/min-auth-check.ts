@@ -222,6 +222,51 @@ async function run(): Promise<void> {
   console.log('user cookie set:', Boolean(userCookie));
   console.log('admin cookie set:', Boolean(adminCookie));
 
+  if (loginUserRes.status !== 200) {
+    process.exitCode = 1;
+    throw new Error(`expected user login status 200, got ${loginUserRes.status}`);
+  }
+  if (loginAdminRes.status !== 200) {
+    process.exitCode = 1;
+    throw new Error(`expected admin login status 200, got ${loginAdminRes.status}`);
+  }
+  if (meRes.status !== 200) {
+    process.exitCode = 1;
+    throw new Error(`expected me status 200, got ${meRes.status}`);
+  }
+  if (logoutRes.status !== 201) {
+    process.exitCode = 1;
+    throw new Error(`expected logout status 201, got ${logoutRes.status}`);
+  }
+  if (meAfterLogoutRes.status !== 401) {
+    process.exitCode = 1;
+    throw new Error(`expected me after logout status 401, got ${meAfterLogoutRes.status}`);
+  }
+  if (adminByUserRes.status !== 403) {
+    process.exitCode = 1;
+    throw new Error(`expected admin by USER status 403, got ${adminByUserRes.status}`);
+  }
+  if (adminByAdminRes.status !== 200) {
+    process.exitCode = 1;
+    throw new Error(`expected admin by ADMIN status 200, got ${adminByAdminRes.status}`);
+  }
+  if (!loginUserJson.user?.id) {
+    process.exitCode = 1;
+    throw new Error('expected user login to include user profile id');
+  }
+  if (!loginAdminJson.user?.id) {
+    process.exitCode = 1;
+    throw new Error('expected admin login to include user profile id');
+  }
+  if (!userCookie) {
+    process.exitCode = 1;
+    throw new Error('expected user login to set cookie');
+  }
+  if (!adminCookie) {
+    process.exitCode = 1;
+    throw new Error('expected admin login to set cookie');
+  }
+
   await app.close();
 }
 
