@@ -49,6 +49,13 @@ enum FileSafetyStatus {
   TIMEOUT
 }
 
+enum FileScanJobStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+}
+
 enum OtpChannel {
   SMS
   EMAIL
@@ -139,6 +146,7 @@ model Material {
   downloads     Download[]
   favorites     Favorite[]
   viewEvents    ViewEvent[]
+  fileScanJob   FileScanJob?
 
   @@index([uploaderId])
   @@index([status, createdAt])
@@ -229,4 +237,21 @@ model OtpAttempt {
   @@index([ip, createdAt])
   @@index([identifier, createdAt])
   @@map("otp_attempts")
+}
+
+
+model FileScanJob {
+  id          String            @id @default(uuid()) @db.Uuid
+  materialId  String            @unique @map("material_id") @db.Uuid
+  fileKey     String            @map("file_key")
+  status      FileScanJobStatus @default(PENDING)
+  attempts    Int               @default(0)
+  lastError   String?           @map("last_error")
+  scheduledAt DateTime          @default(now()) @map("scheduled_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  material    Material          @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledAt])
+  @@map("file_scan_jobs")
 }

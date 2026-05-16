@@ -27,7 +27,10 @@
     "test:min-material-upload-security-regression": "ts-node scripts/min-material-upload-security-regression-check.ts",
     "test:min-cors-config": "ts-node scripts/min-cors-config-check.ts",
     "test:min-auth-token-hardening": "ts-node scripts/min-auth-token-hardening-check.ts",
-    "test:min-recommendations": "ts-node scripts/min-recommendations-check.ts"
+    "test:min-recommendations": "ts-node scripts/min-recommendations-check.ts",
+    "cleanup:otp": "ts-node scripts/cleanup-otp-attempts.ts",
+    "test:min-file-scan-async": "ts-node scripts/min-file-scan-async-check.ts",
+    "test:min-recommend-tiering": "ts-node scripts/min-recommend-tiering-check.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
@@ -61,5 +64,8 @@
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=22 <23"
   }
 }

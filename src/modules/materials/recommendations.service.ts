@@ -4,6 +4,7 @@ import { PrismaService } from '../../infra';
 
 export type RecommendUserProfile = {
   id: string;
+  onboardedAt?: Date | null;
   subjects: string[];
   grades: string[];
   stages: string[];
@@ -12,6 +13,8 @@ export type RecommendUserProfile = {
   schoolId: string | null;
   collaborativeOptIn: boolean;
 };
+
+export type RankerPhase = 'phase-0' | 'phase-1' | 'phase-2' | 'phase-3';
 
 export type RecommendationItem = {
   id: string;
@@ -29,13 +32,20 @@ export type RecommendationItem = {
   score: number;
   reason: string;
   rankerId: string;
+  phase: RankerPhase | null;
 };
 
 const DEFAULT_LIMIT = 6;
 const DEFAULT_RANKER = 'ranker_v1';
+const SCHOOL_DENSITY_MIN = 10;
+const VIEW_EVENT_PHASE2_MIN = 20;
+const DENSITY_CACHE_TTL_MS = 5 * 60 * 1000;
 
 @Injectable()
 export class RecommendationsService {
+
+  private readonly schoolDensityCache = new Map<string, { count: number; expiresAt: number }>();
+
   constructor(private readonly prisma: PrismaService) {}
 
   /**
@@ -53,6 +63,9 @@ export class RecommendationsService {
   ): Promise<RecommendationItem[]> {
     const limit = options.limit ?? DEFAULT_LIMIT;
     const ranker = options.ranker ?? DEFAULT_RANKER;
+    const viewEventCount = await this.prisma.viewEvent.count({ where: { userId: user.id } });
+    const dynamicViewedKinds = await this.getDynamicViewedKinds(user.id);
+    const phase = await this.pickStrategy(user, { viewEventCount });
 
     const materials = await this.prisma.material.findMany({
       where: {
@@ -61,93 +74,72 @@ export class RecommendationsService {
       },
       orderBy: { createdAt: 'desc' },
       take: 200,
-      include: {
-        _count: { select: { downloads: true } },
-      },
+      include: { _count: { select: { downloads: true } } },
     });
 
     const ids = materials.map((m) => m.id);
     const aggregates = ids.length
-      ? await this.prisma.rating.groupBy({
-          by: ['materialId'],
-          where: { materialId: { in: ids } },
-          _avg: { score: true },
-          _count: { score: true },
-        })
+      ? await this.prisma.rating.groupBy({ by: ['materialId'], where: { materialId: { in: ids } }, _avg: { score: true }, _count: { score: true } })
       : [];
-    const aggregateMap = new Map(
-      aggregates.map((row) => [row.materialId, { avg: row._avg.score, count: row._count.score }]),
-    );
+    const aggregateMap = new Map(aggregates.map((row) => [row.materialId, { avg: row._avg.score, count: row._count.score }]));
 
-    const colleagueSignals = await this.getColleagueSignals(user);
+    const colleagueSignals = phase === 'phase-3' ? await this.getColleagueSignals(user) : new Set<string>();
 
-    const subjectKindMap: Record<string, MaterialKind | null> = {
-      习题: MaterialKind.EXERCISE,
-      讲义: MaterialKind.HANDOUT,
-      真题: MaterialKind.EXAM,
-      模拟: MaterialKind.MOCK,
-    };
-    const viewedKindEnums = new Set(
-      user.viewedKinds.map((k) => subjectKindMap[k] ?? null).filter((k): k is MaterialKind => !!k),
-    );
+    const subjectKindMap: Record<string, MaterialKind | null> = { 习题: MaterialKind.EXERCISE, 讲义: MaterialKind.HANDOUT, 真题: MaterialKind.EXAM, 模拟: MaterialKind.MOCK };
+    const viewedSource = phase === 'phase-2' || phase === 'phase-3' ? (dynamicViewedKinds.length ? dynamicViewedKinds : user.viewedKinds) : user.viewedKinds;
+    const viewedKindEnums = new Set(viewedSource.map((k) => subjectKindMap[k] ?? null).filter((k): k is MaterialKind => !!k));
 
     const scored: RecommendationItem[] = materials.map((m) => {
       const agg = aggregateMap.get(m.id) ?? { avg: null, count: 0 };
       const downloads = m._count.downloads;
-      const subjectMatch = m.subject && user.subjects.includes(m.subject) ? 5 : 0;
-      const gradeMatch = m.grade && user.grades.includes(m.grade) ? 3 : 0;
-      const stageMatch = m.stage && user.stages.includes(m.stage) ? 2 : 0;
-      const cityMatch = m.region && user.city && m.region === user.city ? 1.5 : 0;
-      const kindMatch = m.kind && viewedKindEnums.has(m.kind) ? 1 : 0;
+      const contentEnabled = phase !== 'phase-0';
+      const subjectMatch = contentEnabled && m.subject && user.subjects.includes(m.subject) ? 5 : 0;
+      const gradeMatch = contentEnabled && m.grade && user.grades.includes(m.grade) ? 3 : 0;
+      const stageMatch = contentEnabled && m.stage && user.stages.includes(m.stage) ? 2 : 0;
+      const cityMatch = contentEnabled && m.region && user.city && m.region === user.city ? 1.5 : 0;
+      const kindMatch = contentEnabled && m.kind && viewedKindEnums.has(m.kind) ? 1 : 0;
       const popularityScore = Math.log10(downloads + 1) * 0.8;
       const ratingScore = ((agg.avg ?? 4) - 4) * 2;
       const freshnessScore = (m.year ?? 0) >= 2024 ? 0.6 : 0;
-      const collaborativeScore =
-        user.collaborativeOptIn && colleagueSignals.has(m.id) ? 1.5 : 0;
-      const score =
-        subjectMatch +
-        gradeMatch +
-        stageMatch +
-        cityMatch +
-        kindMatch +
-        popularityScore +
-        ratingScore +
-        freshnessScore +
-        collaborativeScore;
-
-      return {
-        id: m.id,
-        title: m.title,
-        description: m.description,
-        subject: m.subject,
-        stage: m.stage,
-        grade: m.grade,
-        kind: m.kind,
-        year: m.year,
-        region: m.region,
-        downloadCount: downloads,
-        avgScore: agg.avg,
-        ratingCount: agg.count,
-        score,
-        reason: this.reasonFor({
-          subjectMatch,
-          gradeMatch,
-          stageMatch,
-          collaborativeScore,
-          downloads,
-          avgScore: agg.avg,
-          year: m.year,
-        }),
-        rankerId: ranker,
-      };
+      const collaborativeScore = phase === 'phase-3' && user.collaborativeOptIn && colleagueSignals.has(m.id) ? 1.5 : 0;
+      const score = phase === 'phase-0'
+        ? popularityScore + ratingScore + freshnessScore
+        : subjectMatch + gradeMatch + stageMatch + cityMatch + kindMatch + popularityScore + ratingScore + freshnessScore + collaborativeScore;
+      return { id: m.id, title: m.title, description: m.description, subject: m.subject, stage: m.stage, grade: m.grade, kind: m.kind, year: m.year, region: m.region, downloadCount: downloads, avgScore: agg.avg, ratingCount: agg.count, score, reason: phase === 'phase-0' ? '热门资料' : this.reasonFor({ subjectMatch, gradeMatch, stageMatch, collaborativeScore, downloads, avgScore: agg.avg, year: m.year }), rankerId: ranker, phase };
     });
 
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, limit);
   }
 
+  async pickStrategy(user: RecommendUserProfile, signals: { viewEventCount: number }): Promise<RankerPhase> {
+    const noProfile = !user.onboardedAt || (user.stages.length === 0 && user.subjects.length === 0);
+    if (noProfile) return 'phase-0';
+    if (signals.viewEventCount < VIEW_EVENT_PHASE2_MIN) return 'phase-1';
+    if (!user.collaborativeOptIn || !user.schoolId) return 'phase-2';
+    const schoolUserCount = await this.getSchoolOnboardedCount(user.schoolId);
+    return schoolUserCount >= SCHOOL_DENSITY_MIN ? 'phase-3' : 'phase-2';
+  }
+
+  private async getDynamicViewedKinds(userId: string): Promise<string[]> {
+    const nowMinus30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const grouped = await this.prisma.viewEvent.groupBy({ by: ['kind'], where: { userId, createdAt: { gt: nowMinus30d } }, _count: true });
+    return grouped.filter((g) => !!g.kind).sort((a,b)=>b._count-a._count).slice(0,2).map((g) => ({ EXERCISE:'习题', HANDOUT:'讲义', EXAM:'真题', MOCK:'模拟' }[g.kind!]));
+  }
+
+  private async getSchoolOnboardedCount(schoolId: string): Promise<number> {
+    const now = Date.now();
+    const cached = this.schoolDensityCache.get(schoolId);
+    if (cached && cached.expiresAt > now) return cached.count;
+    const count = await this.prisma.user.count({ where: { schoolId, onboardedAt: { not: null } } });
+    this.schoolDensityCache.set(schoolId, { count, expiresAt: now + DENSITY_CACHE_TTL_MS });
+    return count;
+  }
+
   private async getColleagueSignals(user: RecommendUserProfile): Promise<Set<string>> {
     if (!user.collaborativeOptIn || !user.schoolId) return new Set();
+    const schoolUserCount = await this.getSchoolOnboardedCount(user.schoolId);
+    if (schoolUserCount < SCHOOL_DENSITY_MIN) return new Set();
     // K-anonymity: require at least 3 distinct colleagues so we can never
     // reverse-infer a single colleague's preferences from this signal.
     const rows = await this.prisma.$queryRaw<{ materialId: string }[]>(

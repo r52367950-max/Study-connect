@@ -102,6 +102,7 @@ export default function RegisterPage() {
     setOtpCode('')
     setFormError(null)
     setOtpNotice(null)
+    countdown.reset()
   }
 
   return (

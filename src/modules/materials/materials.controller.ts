@@ -9,6 +9,7 @@ import {
   Post,
   Query,
   Req,
+  PayloadTooLargeException,
   UnprocessableEntityException,
   UploadedFile,
   UseInterceptors,
@@ -77,10 +78,11 @@ export class MaterialsController {
         viewedKinds: true,
         schoolId: true,
         collaborativeOptIn: true,
+        onboardedAt: true,
       },
     });
     if (!profile) {
-      return { items: [] };
+      return { items: [], phase: null };
     }
     const items = await this.recommendationsService.recommend(
       {
@@ -92,10 +94,11 @@ export class MaterialsController {
         viewedKinds: profile.viewedKinds,
         schoolId: profile.schoolId,
         collaborativeOptIn: profile.collaborativeOptIn,
+        onboardedAt: profile.onboardedAt,
       },
       { limit: query.limit, ranker: query.ranker },
     );
-    return { items };
+    return { items, phase: items[0]?.phase ?? null };
   }
 
   @Get(':id')
@@ -190,13 +193,20 @@ export class MaterialsController {
   ): Promise<UploadedMaterial> {
     const maxUploadSizeMb = getMaxUploadSizeMb(process.env[MAX_UPLOAD_SIZE_MB_KEY]);
 
-    assertUploadFileSize(file, maxUploadSizeMb);
+    try {
+      assertUploadFileSize(file, maxUploadSizeMb);
 
-    return this.materialsService.createWithFile({
-      uploaderId: req.user.id,
-      dto,
-      file,
-    });
+      return this.materialsService.createWithFile({
+        uploaderId: req.user.id,
+        dto,
+        file,
+      });
+    } catch (error) {
+      if (error instanceof PayloadTooLargeException) {
+        throw new UnprocessableEntityException('File exceeds size limit');
+      }
+      throw error;
+    }
   }
 }
 
