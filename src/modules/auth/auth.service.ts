@@ -8,7 +8,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OtpChannel, OtpPurpose, User, UserRole, UserStatus } from '@prisma/client';
-import { randomBytes, scryptSync, timingSafeEqual, createHmac } from 'crypto';
+import { randomBytes, scrypt, timingSafeEqual, createHmac } from 'crypto';
+import { promisify } from 'util';
 import { PrismaService } from '../../infra';
 import { RateLimitService } from '../../common/rate-limit.service';
 import { normalizePhone } from '../../common/util';
@@ -23,11 +24,9 @@ export type AuthUser = Pick<User, 'id' | 'email' | 'username' | 'role'> & {
 type AccessPayload = {
   type: 'access';
   sub: string;
-  email: string | null;
-  phone: string | null;
-  username: string;
   role: UserRole;
   ver: number;
+  iat: number;
   exp: number;
 };
 
@@ -37,6 +36,8 @@ type RefreshPayload = {
   ver: number;
   exp: number;
 };
+
+const scryptAsync = promisify(scrypt);
 
 @Injectable()
 export class AuthService {
@@ -81,7 +82,7 @@ export class AuthService {
       throw new UnprocessableEntityException('Identifier or username already exists');
     }
 
-    const passwordHash = this.hashPassword(dto.password);
+    const passwordHash = await this.hashPassword(dto.password);
 
     const user = await this.prisma.user.create({
       data: {
@@ -145,7 +146,7 @@ export class AuthService {
     }
 
     if (dto.password) {
-      if (!this.verifyPassword(dto.password, user.passwordHash)) {
+      if (!(await this.verifyPassword(dto.password, user.passwordHash))) {
         this.recordLoginFailure(identifier, ipAddress);
         throw new UnauthorizedException('Invalid credentials');
       }
@@ -237,6 +238,11 @@ export class AuthService {
     };
   }
 
+  parseAndVerifyRefreshTokenForLogout(token: string): { sub: string } {
+    const payload = this.parseAndVerifyRefreshToken(token);
+    return { sub: payload.sub };
+  }
+
   async rotateTokenVersion(userId: string): Promise<void> {
     await this.prisma.user.update({
       where: { id: userId },
@@ -258,14 +264,14 @@ export class AuthService {
       throw new UnauthorizedException('User not available');
     }
 
-    if (!this.verifyPassword(currentPassword, user.passwordHash)) {
-      throw new UnauthorizedException('Current password is incorrect');
+    if (!(await this.verifyPassword(currentPassword, user.passwordHash))) {
+      throw new ForbiddenException('Current password is incorrect');
     }
 
     await this.prisma.user.update({
       where: { id: userId },
       data: {
-        passwordHash: this.hashPassword(newPassword),
+        passwordHash: await this.hashPassword(newPassword),
         tokenVersion: { increment: 1 },
       },
     });
@@ -291,20 +297,20 @@ export class AuthService {
     });
   }
 
-  private hashPassword(password: string): string {
+  private async hashPassword(password: string): Promise<string> {
     const salt = randomBytes(16).toString('hex');
-    const derived = scryptSync(password, salt, 64).toString('hex');
-    return `${salt}:${derived}`;
+    const derived = (await scryptAsync(password, salt, 64)) as Buffer;
+    return `${salt}:${derived.toString('hex')}`;
   }
 
-  private verifyPassword(password: string, stored: string): boolean {
+  private async verifyPassword(password: string, stored: string): Promise<boolean> {
     const [salt, savedHash] = stored.split(':');
 
     if (!salt || !savedHash) {
       return false;
     }
 
-    const inputHash = scryptSync(password, salt, 64);
+    const inputHash = (await scryptAsync(password, salt, 64)) as Buffer;
     const savedBuffer = Buffer.from(savedHash, 'hex');
 
     if (savedBuffer.length !== inputHash.length) {
@@ -316,15 +322,14 @@ export class AuthService {
 
   private issueAccessToken(user: AuthUser, tokenVersion: number): string {
     const header = { alg: 'HS256', typ: 'JWT' };
+    const nowSeconds = Math.floor(Date.now() / 1000);
     const payload: AccessPayload = {
       type: 'access',
       sub: user.id,
-      email: user.email,
-      phone: user.phone,
-      username: user.username,
       role: user.role,
       ver: tokenVersion,
-      exp: Math.floor(Date.now() / 1000) + this.getNumber('JWT_ACCESS_TTL_SECONDS', 15 * 60),
+      iat: nowSeconds,
+      exp: nowSeconds + this.getNumber('JWT_ACCESS_TTL_SECONDS', 15 * 60),
     };
 
     const encodedHeader = this.base64UrlEncode(JSON.stringify(header));
@@ -357,9 +362,9 @@ export class AuthService {
     if (
       payload.type !== 'access' ||
       !payload.sub ||
-      !payload.username ||
       !payload.role ||
       typeof payload.ver !== 'number' ||
+      typeof payload.iat !== 'number' ||
       !payload.exp
     ) {
       throw new UnauthorizedException('Invalid token');
@@ -396,7 +401,17 @@ export class AuthService {
       }
 
       const payloadText = this.base64UrlDecode(encodedPayload);
-      return JSON.parse(payloadText) as Record<string, unknown>;
+      const payload = JSON.parse(payloadText) as Record<string, unknown>;
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const exp = typeof payload.exp === 'number' ? payload.exp : NaN;
+      const iat = typeof payload.iat === 'number' ? payload.iat : nowSeconds;
+      if (!Number.isFinite(exp) || exp + 30 < nowSeconds) {
+        throw new Error('Token expired');
+      }
+      if (!Number.isFinite(iat) || iat > nowSeconds + 30) {
+        throw new Error('Token issued in the future');
+      }
+      return payload;
     } catch {
       throw new UnauthorizedException('Invalid token');
     }

@@ -9,11 +9,28 @@ import {
   createCorsOriginDelegate,
   parseAllowedCorsOrigins,
 } from './common/security/cors-config';
+import { assertSecretStrength } from './common/security/secret-strength';
 
 
 async function bootstrap() {
+  assertSecretStrength('JWT_SECRET', process.env.JWT_SECRET);
+  assertSecretStrength('OTP_SECRET', process.env.OTP_SECRET ?? process.env.JWT_SECRET);
+
   const app = await NestFactory.create(AppModule);
   const isProduction = process.env.NODE_ENV === 'production';
+
+  const trustProxy = process.env.TRUST_PROXY;
+  if (trustProxy) {
+    const proxyValue = Number(trustProxy);
+    (app as unknown as { set: (key: string, value: unknown) => void }).set(
+      'trust proxy',
+      Number.isFinite(proxyValue) && proxyValue > 0 ? proxyValue : trustProxy,
+    );
+  }
+
+  if (process.env.AUTH_OTP_TEST_BYPASS === 'true') {
+    console.warn('OTP test bypass is ACTIVE');
+  }
 
   app.use(applySecurityHeaders);
   app.useGlobalFilters(new HttpExceptionFilter(isProduction));
@@ -64,6 +81,7 @@ function applySecurityHeaders(req: Request, res: Response, next: NextFunction): 
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
 
   const csp = [
     "default-src 'none'",
