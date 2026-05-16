@@ -161,3 +161,25 @@ function assertText(payload: Buffer): void {
     throw new UnprocessableEntityException('INVALID_TEXT_STRUCTURE');
   }
 }
+
+
+export function sanitizeFilename(name: string): string {
+  const withoutControl = name.replace(/[\u0000-\u001F\u007F]/g, "");
+  const basename = withoutControl.split(/[\/\\]/).pop() ?? "file";
+  const dotIndex = basename.lastIndexOf(".");
+  const ext = dotIndex > 0 ? basename.slice(dotIndex) : "";
+  const body = dotIndex > 0 ? basename.slice(0, dotIndex) : basename;
+  const safeBody = body.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+  const safeExt = ext.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/_+/g, "_");
+  const fallbackBody = safeBody || "file";
+  const maxLen = 120;
+  const extLen = safeExt.length;
+  const bodyLimit = Math.max(1, maxLen - extLen);
+  const trimmedBody = fallbackBody.slice(0, bodyLimit);
+  const combined = `${trimmedBody}${safeExt}`.slice(0, maxLen);
+  return combined || "file";
+}
+
+export function stripControlChars(input: string): string {
+  return input.replace(/[\u0000-\u001F\u007F]/g, "");
+}

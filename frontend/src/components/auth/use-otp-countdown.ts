@@ -10,6 +10,7 @@ export function useOtpCountdown(): {
   remaining: number
   active: boolean
   start: (seconds: number) => void
+  reset: () => void
 } {
   const [remaining, setRemaining] = useState(0)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -38,7 +39,12 @@ export function useOtpCountdown(): {
     [clear],
   )
 
+  const reset = useCallback(() => {
+    clear()
+    setRemaining(0)
+  }, [clear])
+
   useEffect(() => clear, [clear])
 
-  return { remaining, active: remaining > 0, start }
+  return { remaining, active: remaining > 0, start, reset }
 }

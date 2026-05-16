@@ -7,13 +7,13 @@ export class CreateMaterialDto {
   @ApiProperty({ example: 'Linear Algebra Notes' })
   @IsString()
   @MinLength(2)
-  @MaxLength(120)
+  @MaxLength(200)
   title!: string;
 
   @ApiPropertyOptional({ example: 'Week 1-4 summary.' })
   @IsOptional()
   @IsString()
-  @MaxLength(1000)
+  @MaxLength(2000)
   description?: string;
 
   @ApiPropertyOptional({ example: 'HighSchool' })
