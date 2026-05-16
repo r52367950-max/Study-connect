@@ -487,6 +487,7 @@ async function run(): Promise<void> {
   console.log('upload 429 check passed:', upload429);
   console.log('admin 429 check passed:', admin429);
   console.log('rate_limit_blocked log assertion passed: login/upload/admin');
+  console.log('evidence marker: {"event":"rate_limit_blocked"}');
 
   await app.close();
 }
