@@ -15,11 +15,11 @@ export const useAuthStore = create<AuthState>()((set) => ({
   accessToken: null,
   initialized: false,
   setAuth: (user: User, accessToken?: string) => {
-    set((state) => ({
+    set({
       user,
       accessToken: accessToken ?? (state.user?.id === user.id ? state.accessToken : null),
       initialized: true,
-    }))
+    })
   },
   clearAuth: () => {
     set({ user: null, accessToken: null, initialized: true })
