@@ -8,6 +8,7 @@ import { MaterialRatingsQueryDto } from './dto/material-ratings-query.dto';
 import { MaterialSearchQueryDto, MaterialSort } from './dto/material-search-query.dto';
 import { UploadFileInput } from './file-upload.type';
 import { FileScanService } from './file-scan.service';
+import { sanitizeFilename, stripControlChars } from './upload-security.util';
 
 export type UploadedMaterial = Pick<
   Material,
@@ -42,7 +43,7 @@ export class MaterialsService {
     dto: CreateMaterialDto;
     file: UploadFileInput;
   }): Promise<UploadedMaterial> {
-    const safeName = params.file.originalname.replace(/\s+/g, '-');
+    const safeName = sanitizeFilename(params.file.originalname);
     const key = `${new Date().toISOString().slice(0, 10)}/${randomUUID()}-${safeName}`;
 
     await this.minioService.uploadObject(key, params.file.buffer, params.file.mimetype);
@@ -51,8 +52,8 @@ export class MaterialsService {
     try {
       material = await this.prisma.material.create({
       data: {
-        title: params.dto.title,
-        description: params.dto.description,
+        title: stripControlChars(params.dto.title),
+        description: params.dto.description ? stripControlChars(params.dto.description) : undefined,
         stage: params.dto.stage,
         grade: params.dto.grade,
         subject: params.dto.subject,
@@ -88,7 +89,7 @@ export class MaterialsService {
       throw err;
     }
 
-    this.fileScanService.enqueueScan(material.id, params.file);
+    await this.fileScanService.enqueueScan(material.id, key);
 
     return material;
   }

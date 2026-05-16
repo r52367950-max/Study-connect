@@ -127,9 +127,18 @@ export class AuthService {
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
-    const user = await this.prisma.user.findFirst({
-      where: dto.email ? { email: identifier } : { phone: identifier },
-    });
+    let user;
+    try {
+      user = await this.prisma.user.findFirst({
+        where: dto.email ? { email: identifier } : { phone: identifier },
+      });
+    } catch {
+      user = await this.prisma.user.findFirst({
+        where: {
+          OR: [dto.email ? { email: identifier } : { phone: identifier }],
+        },
+      });
+    }
 
     const userStatus = user?.status ?? UserStatus.ACTIVE;
     if (!user || userStatus === UserStatus.BANNED) {

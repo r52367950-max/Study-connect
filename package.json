@@ -28,7 +28,8 @@
     "test:min-cors-config": "ts-node scripts/min-cors-config-check.ts",
     "test:min-auth-token-hardening": "ts-node scripts/min-auth-token-hardening-check.ts",
     "test:min-recommendations": "ts-node scripts/min-recommendations-check.ts",
-    "cleanup:otp": "ts-node scripts/cleanup-otp-attempts.ts"
+    "cleanup:otp": "ts-node scripts/cleanup-otp-attempts.ts",
+    "test:min-file-scan-async": "ts-node scripts/min-file-scan-async-check.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
