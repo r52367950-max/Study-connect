@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ForbiddenException,
   HttpException,
   HttpStatus,
   Injectable,
@@ -239,9 +238,6 @@ export class AuthService {
   }
 
   async rotateTokenVersion(userId: string): Promise<void> {
-    if (typeof (this.prisma.user as { update?: unknown }).update !== 'function') {
-      return;
-    }
     await this.prisma.user.update({
       where: { id: userId },
       data: { tokenVersion: { increment: 1 } },
@@ -263,7 +259,7 @@ export class AuthService {
     }
 
     if (!this.verifyPassword(currentPassword, user.passwordHash)) {
-      throw new ForbiddenException('Current password is incorrect');
+      throw new UnauthorizedException('Current password is incorrect');
     }
 
     await this.prisma.user.update({

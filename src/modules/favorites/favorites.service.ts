@@ -62,8 +62,6 @@ export class FavoritesService {
               kind: true,
               year: true,
               region: true,
-              status: true,
-              visibility: true,
               createdAt: true,
             },
           },

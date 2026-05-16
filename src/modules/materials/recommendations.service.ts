@@ -160,6 +160,7 @@ export class RecommendationsService {
           AND u."id" <> ${user.id}::uuid
           AND u."collaborative_opt_in" = true
           AND m."status" = 'APPROVED'
+          AND m."visibility" = 'PUBLIC'
         GROUP BY m."id"
         HAVING COUNT(DISTINCT u."id") >= 3
       `,
