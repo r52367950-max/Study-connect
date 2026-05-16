@@ -1,3 +1,4 @@
+import { FileSafetyStatus } from '@prisma/client';
 import assert from 'node:assert/strict';
 import { UnprocessableEntityException } from '@nestjs/common';
 import { UploadFileInput } from '../src/modules/materials/file-upload.type';
@@ -35,7 +36,7 @@ function run(): void {
       mimetype: 'application/pdf',
       buffer: validPdf,
     })),
-    'PASSED',
+    FileSafetyStatus.PASSED,
   );
 
   const forgedMime = Buffer.from('MZ fake executable', 'ascii');
@@ -82,7 +83,7 @@ function run(): void {
         buffer: pseudoDocx,
       }),
     ),
-    'PASSED',
+    FileSafetyStatus.PASSED,
   );
 
   console.log('min-material-upload-security-regression-check passed');
