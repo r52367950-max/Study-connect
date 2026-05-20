@@ -6,6 +6,8 @@ import { getMaterials } from '@/lib/api/materials'
 import { getErrorMessage } from '@/lib/api/client'
 import type { MaterialSearchParams } from '@/types'
 import { MaterialRow } from './material-row'
+import { MaterialRowListSkeleton } from './material-skeletons'
+import { ContentTransition } from '@/components/shared/page-transition'
 import { LoadingSpinner } from '@/components/shared/loading-spinner'
 import { EmptyState } from '@/components/shared/empty-state'
 import { ErrorState } from '@/components/shared/error-state'
@@ -60,35 +62,31 @@ export function MaterialInfiniteList({
     return () => observer.disconnect()
   }, [hasNextPage, isFetchingNextPage, fetchNextPage])
 
-  if (isLoading) {
-    return <LoadingSpinner size="lg" className="py-20" text="正在加载资料…" />
-  }
-  if (isError) {
-    return <ErrorState message={getErrorMessage(error)} onRetry={() => refetch()} className="py-20" />
-  }
-
   const items = data?.pages.flatMap((page) => page.items) ?? []
-  if (items.length === 0) {
-    return (
-      <EmptyState
-        title={emptyTitle}
-        description={emptyDescription}
-        action={emptyAction}
-        className="py-16"
-      />
-    )
-  }
 
   return (
-    <div className="space-y-2">
-      {items.map((material) => (
-        <MaterialRow key={material.id} material={material} />
-      ))}
-      <div ref={sentinelRef} className="h-px" />
-      {isFetchingNextPage && <LoadingSpinner className="py-4" text="加载更多…" />}
-      {!hasNextPage && (
-        <p className="py-4 text-center text-xs text-muted-foreground">没有更多了</p>
+    <ContentTransition isLoading={isLoading} skeleton={<MaterialRowListSkeleton />}>
+      {isError ? (
+        <ErrorState message={getErrorMessage(error)} onRetry={() => refetch()} className="py-20" />
+      ) : items.length === 0 ? (
+        <EmptyState
+          title={emptyTitle}
+          description={emptyDescription}
+          action={emptyAction}
+          className="py-16"
+        />
+      ) : (
+        <div className="space-y-2">
+          {items.map((material) => (
+            <MaterialRow key={material.id} material={material} />
+          ))}
+          <div ref={sentinelRef} className="h-px" />
+          {isFetchingNextPage && <LoadingSpinner className="py-4" text="加载更多…" />}
+          {!hasNextPage && (
+            <p className="py-4 text-center text-xs text-muted-foreground">没有更多了</p>
+          )}
+        </div>
       )}
-    </div>
+    </ContentTransition>
   )
 }

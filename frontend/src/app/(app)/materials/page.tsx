@@ -6,9 +6,10 @@ import { getMaterials } from '@/lib/api/materials'
 import { getErrorMessage } from '@/lib/api/client'
 import type { MaterialSearchParams } from '@/types'
 import { MaterialCard } from '@/components/materials/material-card'
+import { MaterialCardGridSkeleton } from '@/components/materials/material-skeletons'
 import { FilterBar } from '@/components/materials/filter-bar'
 import { Pagination } from '@/components/shared/pagination'
-import { LoadingSpinner } from '@/components/shared/loading-spinner'
+import { ContentTransition } from '@/components/shared/page-transition'
 import { EmptyState } from '@/components/shared/empty-state'
 import { ErrorState } from '@/components/shared/error-state'
 
@@ -60,43 +61,43 @@ export default function MaterialsPage() {
       <FilterBar params={params} onChange={handleParamsChange} onSearch={handleSearch} />
 
       {/* Results */}
-      {isLoading ? (
-        <LoadingSpinner size="lg" className="py-20" text="正在加载资料…" />
-      ) : isError ? (
-        <ErrorState
-          message={getErrorMessage(error)}
-          onRetry={() => refetch()}
-          className="py-20"
-        />
-      ) : !data?.items.length ? (
-        <EmptyState
-          title="未找到相关资料"
-          description="换个关键词或筛选条件试试"
-          className="py-20"
-        />
-      ) : (
-        <>
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">
-              共 <span className="font-medium text-foreground">{data.total}</span> 份资料
-            </p>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {data.items.map((m) => (
-              <MaterialCard key={m.id} material={m} />
-            ))}
-          </div>
-
-          <Pagination
-            page={committedParams.page ?? 1}
-            total={data.total}
-            pageSize={committedParams.pageSize ?? DEFAULT_PAGE_SIZE}
-            onPageChange={handlePageChange}
-            className="pt-4"
+      <ContentTransition isLoading={isLoading} skeleton={<MaterialCardGridSkeleton />}>
+        {isError ? (
+          <ErrorState
+            message={getErrorMessage(error)}
+            onRetry={() => refetch()}
+            className="py-20"
           />
-        </>
-      )}
+        ) : !data?.items.length ? (
+          <EmptyState
+            title="未找到相关资料"
+            description="换个关键词或筛选条件试试"
+            className="py-20"
+          />
+        ) : (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                共 <span className="font-medium text-foreground">{data.total}</span> 份资料
+              </p>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {data.items.map((m) => (
+                <MaterialCard key={m.id} material={m} />
+              ))}
+            </div>
+
+            <Pagination
+              page={committedParams.page ?? 1}
+              total={data.total}
+              pageSize={committedParams.pageSize ?? DEFAULT_PAGE_SIZE}
+              onPageChange={handlePageChange}
+              className="pt-4"
+            />
+          </div>
+        )}
+      </ContentTransition>
     </div>
   )
 }

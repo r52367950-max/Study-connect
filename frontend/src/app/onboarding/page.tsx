@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/hooks/use-auth'
 import { useProfile } from '@/hooks/use-profile'
 import { OnboardingForm } from '@/components/onboarding/onboarding-form'
+import { toast } from '@/components/ui/use-toast'
 
 function LoadingBox() {
   return (
@@ -56,7 +57,10 @@ function OnboardingPageContent() {
       </div>
       <OnboardingForm
         initialValue={profile ?? null}
-        onSaved={() => router.replace(redirect)}
+        onSaved={() => {
+          toast({ title: '欢迎加入 StudyConnect', description: '已根据你的资料为你准备推荐' })
+          router.replace(redirect)
+        }}
       />
     </div>
   )
