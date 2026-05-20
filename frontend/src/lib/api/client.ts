@@ -8,7 +8,7 @@ export const apiClient = axios.create({
 })
 
 const CSRF_COOKIE_NAME = 'csrf-token'
-const CSRF_HEADER_NAME = 'x-csrf-token'
+export const CSRF_HEADER_NAME = 'x-csrf-token'
 const STATE_CHANGING_METHODS = new Set(['post', 'put', 'patch', 'delete'])
 let csrfBootstrapPromise: Promise<string> | null = null
 
@@ -24,7 +24,7 @@ function isCsrfBootstrapRequest(requestUrl: string): boolean {
   }
 }
 
-function getCsrfTokenFromCookie(): string | null {
+export function getCsrfTokenFromCookie(): string | null {
   if (typeof document === 'undefined') return null
   const cookies = document.cookie ? document.cookie.split(';') : []
   for (const item of cookies) {
@@ -36,7 +36,7 @@ function getCsrfTokenFromCookie(): string | null {
   return null
 }
 
-async function ensureCsrfToken(): Promise<string> {
+export async function ensureCsrfToken(): Promise<string> {
   const cookieToken = getCsrfTokenFromCookie()
   if (cookieToken) {
     return cookieToken
