@@ -54,6 +54,10 @@ const config: Config = {
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)',
       },
+      transitionTimingFunction: {
+        // Shared "ease-rise" curve for page/content transitions (use as `ease-rise`).
+        rise: 'cubic-bezier(0.2, 0.7, 0.2, 1)',
+      },
       keyframes: {
         'accordion-down': {
           from: { height: '0' },

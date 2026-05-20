@@ -1,8 +1,9 @@
 'use client'
 
 import { useRouter, usePathname } from 'next/navigation'
-import { Upload, FilePlus2 } from 'lucide-react'
+import { Upload, FilePlus2, Menu } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useSidebarStore } from '@/lib/sidebar-store'
 import { toast } from '@/components/ui/use-toast'
 
 function deriveTitle(pathname: string): string {
@@ -27,11 +28,23 @@ function deriveTitle(pathname: string): string {
 export function Topbar() {
   const router = useRouter()
   const pathname = usePathname()
+  const setMobileOpen = useSidebarStore((s) => s.setMobileOpen)
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b bg-background/95 px-6 backdrop-blur">
-      <h2 className="truncate text-sm font-semibold tracking-tight">{deriveTitle(pathname)}</h2>
-      <div className="flex items-center gap-2">
+    <header className="flex h-14 shrink-0 items-center justify-between border-b bg-background/95 px-4 backdrop-blur lg:px-6">
+      <div className="flex min-w-0 items-center gap-2">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="lg:hidden"
+          aria-label="打开导航"
+          onClick={() => setMobileOpen(true)}
+        >
+          <Menu className="h-5 w-5" />
+        </Button>
+        <h2 className="truncate text-sm font-semibold tracking-tight">{deriveTitle(pathname)}</h2>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
         <Button variant="ghost" size="sm" onClick={() => router.push('/upload')}>
           <Upload className="h-4 w-4" />
           上传资料

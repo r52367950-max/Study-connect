@@ -13,11 +13,15 @@ interface RecommendItem {
   region?: string | null
   downloadCount?: number
   avgScore?: number | null
+  reason?: string | null
 }
 
-export async function getRecommendedMaterials(limit = 20): Promise<MaterialRowItem[]> {
+export async function getRecommendedMaterials(
+  limit = 20,
+  ranker?: string,
+): Promise<MaterialRowItem[]> {
   const { data } = await apiClient.get<{ items: RecommendItem[] }>('/materials/recommend', {
-    params: { limit },
+    params: { limit, ranker },
   })
   return (data.items ?? []).map((m) => ({
     id: m.id,
@@ -31,5 +35,6 @@ export async function getRecommendedMaterials(limit = 20): Promise<MaterialRowIt
     region: m.region,
     avg_score: m.avgScore ?? null,
     download_count: m.downloadCount ?? 0,
+    reason: m.reason ?? null,
   }))
 }

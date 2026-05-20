@@ -129,6 +129,8 @@ export interface MaterialRowItem {
   region?: string | null
   avg_score?: number | null
   download_count?: number
+  // Human-readable recommendation rationale (only present on /materials/recommend results).
+  reason?: string | null
 }
 
 // ─── Rating ──────────────────────────────────────────────────────────────────

@@ -1,11 +1,13 @@
 'use client'
 
+import { useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Star, Download } from 'lucide-react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { MaterialRowItem } from '@/types'
 import { addFavorite, removeFavorite } from '@/lib/api/favorites'
+import { reportViewEvent } from '@/lib/api/view-events'
 import { getErrorMessage } from '@/lib/api/client'
 import { useAuth } from '@/hooks/use-auth'
 import { useFavorites } from '@/hooks/use-favorites'
@@ -18,12 +20,52 @@ interface MaterialRowProps {
   material: MaterialRowItem
 }
 
+// One impression per material per session, shared across every <MaterialRow>
+// instance (recommendations + list + favorites) so the same card seen twice
+// isn't double-counted.
+const reportedViewIds = new Set<string>()
+const IMPRESSION_DWELL_MS = 500
+
 export function MaterialRow({ material }: MaterialRowProps) {
   const router = useRouter()
   const queryClient = useQueryClient()
   const { isLoggedIn } = useAuth()
   const { favoriteIds } = useFavorites()
   const isFav = favoriteIds.has(material.id)
+  const rowRef = useRef<HTMLDivElement | null>(null)
+
+  // Impression tracking: when the row stays ~500ms visible, log one view event.
+  useEffect(() => {
+    if (!isLoggedIn) return
+    const el = rowRef.current
+    if (!el) return
+    if (reportedViewIds.has(material.id)) return
+
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0]
+        if (entry?.isIntersecting) {
+          if (timer == null && !reportedViewIds.has(material.id)) {
+            timer = setTimeout(() => {
+              reportedViewIds.add(material.id)
+              observer.disconnect()
+              void reportViewEvent({ materialId: material.id, kind: material.kind })
+            }, IMPRESSION_DWELL_MS)
+          }
+        } else if (timer != null) {
+          clearTimeout(timer)
+          timer = null
+        }
+      },
+      { threshold: 0.5 },
+    )
+    observer.observe(el)
+    return () => {
+      if (timer != null) clearTimeout(timer)
+      observer.disconnect()
+    }
+  }, [isLoggedIn, material.id, material.kind])
 
   const mutation = useMutation({
     mutationFn: () => (isFav ? removeFavorite(material.id) : addFavorite(material.id)),
@@ -47,7 +89,10 @@ export function MaterialRow({ material }: MaterialRowProps) {
   }
 
   return (
-    <div className="group flex items-center gap-3 rounded-lg border bg-card px-4 py-3 transition-colors hover:border-foreground/20 hover:bg-accent/40">
+    <div
+      ref={rowRef}
+      className="group flex items-center gap-3 rounded-lg border bg-card px-4 py-3 transition-colors hover:border-foreground/20 hover:bg-accent/40"
+    >
       <SubjectIcon subject={material.subject} />
       <Link href={`/materials/${material.id}`} className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
@@ -56,15 +101,20 @@ export function MaterialRow({ material }: MaterialRowProps) {
           </h3>
           <KindTag kind={material.kind} />
         </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-          {material.subject && <span>{material.subject}</span>}
-          {material.grade && <span>{material.grade}</span>}
-          {material.year && <span>{material.year}年</span>}
-          <span className="flex items-center gap-0.5">
+        <div className="mt-0.5 flex items-center gap-x-2 gap-y-0.5 overflow-hidden text-xs text-muted-foreground md:flex-wrap md:gap-x-3">
+          {material.reason && (
+            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground/90">
+              {material.reason}
+            </span>
+          )}
+          {material.subject && <span className="shrink-0">{material.subject}</span>}
+          {material.grade && <span className="shrink-0">{material.grade}</span>}
+          {material.year && <span className="shrink-0">{material.year}年</span>}
+          <span className="flex shrink-0 items-center gap-0.5">
             <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
             {formatScore(material.avg_score)}
           </span>
-          <span className="flex items-center gap-0.5">
+          <span className="flex shrink-0 items-center gap-0.5">
             <Download className="h-3 w-3" />
             {material.download_count ?? 0}
           </span>

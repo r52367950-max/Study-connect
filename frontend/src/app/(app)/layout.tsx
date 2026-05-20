@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect } from 'react'
-import { Sidebar } from '@/components/layout/sidebar'
+import { Sidebar, MobileSidebar } from '@/components/layout/sidebar'
 import { Topbar } from '@/components/layout/topbar'
 import { CommandPalette } from '@/components/shared/command-palette'
+import { GradeUpgradeDialog } from '@/components/shared/grade-upgrade-dialog'
 import { toast } from '@/components/ui/use-toast'
 
 const DIRB_ENABLED = process.env.NEXT_PUBLIC_DIRB_ENABLED !== 'false'
@@ -32,11 +33,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar />
+      <MobileSidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
-        <main className="flex-1 overflow-y-auto px-6 py-6">{children}</main>
+        <main className="flex-1 overflow-y-auto px-4 py-6 lg:px-6">{children}</main>
       </div>
       <CommandPalette />
+      <GradeUpgradeDialog />
     </div>
   )
 }

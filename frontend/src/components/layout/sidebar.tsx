@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { BookOpen, Home, TrendingUp, Star, ChevronRight, LogIn, Search } from 'lucide-react'
@@ -8,8 +8,10 @@ import { useAuth } from '@/hooks/use-auth'
 import { useProfile } from '@/hooks/use-profile'
 import { useFavorites } from '@/hooks/use-favorites'
 import { useCommandPaletteStore } from '@/lib/command-palette-store'
+import { useSidebarStore } from '@/lib/sidebar-store'
 import { SUBJECTS, STAGES, GRADES_BY_STAGE } from '@/components/onboarding/constants'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { identifierLabel } from '@/lib/user-display'
 import { cn } from '@/lib/utils'
 
@@ -21,7 +23,11 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function Sidebar() {
+/**
+ * The sidebar's inner column, shared by the desktop rail and the mobile drawer.
+ * `onNavigate` lets the drawer close itself when a link/search is activated.
+ */
+function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
   const decoded = (() => {
     try {
@@ -35,12 +41,29 @@ export function Sidebar() {
   const { data: favorites } = useFavorites()
   const setCommandOpen = useCommandPaletteStore((s) => s.setOpen)
   const [openStages, setOpenStages] = useState<Record<string, boolean>>({})
+  const autoExpanded = useRef(false)
+
+  // Default-expand every stage the user teaches when they have more than one.
+  useEffect(() => {
+    if (autoExpanded.current) return
+    const stages = profile?.stages ?? []
+    if (stages.length <= 1) return
+    autoExpanded.current = true
+    setOpenStages((prev) => {
+      const next = { ...prev }
+      for (const stage of stages) {
+        if ((STAGES as readonly string[]).includes(stage)) next[stage] = true
+      }
+      return next
+    })
+  }, [profile?.stages])
 
   const navItem = (href: string, label: string, icon: React.ReactNode, badge?: number) => {
     const active = href === '/' ? decoded === '/' : decoded === href || decoded.startsWith(`${href}/`)
     return (
       <Link
         href={href}
+        onClick={onNavigate}
         className={cn(
           'flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors',
           active ? 'bg-accent font-medium text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60',
@@ -56,9 +79,13 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex h-full w-60 shrink-0 flex-col border-r bg-background">
+    <div className="flex h-full flex-col bg-background">
       {/* Brand */}
-      <Link href="/" className="flex items-center gap-2 px-4 py-4 font-semibold tracking-tight">
+      <Link
+        href="/"
+        onClick={onNavigate}
+        className="flex items-center gap-2 px-4 py-4 font-semibold tracking-tight"
+      >
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground">
           <BookOpen className="h-4 w-4 text-background" />
         </div>
@@ -68,7 +95,10 @@ export function Sidebar() {
       {/* Search trigger (opens ⌘K command palette) */}
       <button
         type="button"
-        onClick={() => setCommandOpen(true)}
+        onClick={() => {
+          onNavigate?.()
+          setCommandOpen(true)
+        }}
         className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-input bg-muted/30 px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted/60"
       >
         <Search className="h-3.5 w-3.5" />
@@ -93,6 +123,7 @@ export function Sidebar() {
               <Link
                 key={subject}
                 href={href}
+                onClick={onNavigate}
                 className={cn(
                   'block rounded-md px-3 py-1.5 text-sm transition-colors',
                   active ? 'bg-accent font-medium text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60',
@@ -127,6 +158,7 @@ export function Sidebar() {
                         <Link
                           key={grade}
                           href={href}
+                          onClick={onNavigate}
                           className={cn(
                             'block rounded-md px-3 py-1 text-sm transition-colors',
                             active
@@ -149,7 +181,11 @@ export function Sidebar() {
       {/* User footer */}
       <div className="border-t p-3">
         {isLoggedIn ? (
-          <Link href="/profile" className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent/60">
+          <Link
+            href="/profile"
+            onClick={onNavigate}
+            className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent/60"
+          >
             <Avatar className="h-7 w-7">
               <AvatarFallback className="bg-foreground text-xs text-background">
                 {(profile?.displayName ?? user?.username ?? 'U').slice(0, 2).toUpperCase()}
@@ -165,6 +201,7 @@ export function Sidebar() {
         ) : (
           <Link
             href="/login"
+            onClick={onNavigate}
             className="flex items-center justify-center gap-2 rounded-md border px-3 py-1.5 text-sm hover:bg-accent/60"
           >
             <LogIn className="h-4 w-4" />
@@ -172,6 +209,30 @@ export function Sidebar() {
           </Link>
         )}
       </div>
+    </div>
+  )
+}
+
+/** Desktop rail — fixed and inline at `lg` and up. */
+export function Sidebar() {
+  return (
+    <aside className="hidden w-60 shrink-0 border-r lg:block">
+      <SidebarContent />
     </aside>
+  )
+}
+
+/** Mobile drawer — opened from the topbar hamburger below `lg`. */
+export function MobileSidebar() {
+  const mobileOpen = useSidebarStore((s) => s.mobileOpen)
+  const setMobileOpen = useSidebarStore((s) => s.setMobileOpen)
+
+  return (
+    <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+      <SheetContent side="left" className="w-72 p-0">
+        <SheetTitle className="sr-only">导航</SheetTitle>
+        <SidebarContent onNavigate={() => setMobileOpen(false)} />
+      </SheetContent>
+    </Sheet>
   )
 }
