@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getMaterials } from '@/lib/api/materials'
 import { getErrorMessage } from '@/lib/api/client'
@@ -11,7 +11,6 @@ import { Pagination } from '@/components/shared/pagination'
 import { LoadingSpinner } from '@/components/shared/loading-spinner'
 import { EmptyState } from '@/components/shared/empty-state'
 import { ErrorState } from '@/components/shared/error-state'
-import { toast } from '@/components/ui/use-toast'
 
 const DEFAULT_PAGE_SIZE = 12
 
@@ -23,21 +22,6 @@ export default function MaterialsPage() {
   })
   // Committed search params (only update on search button click / filter change)
   const [committedParams, setCommittedParams] = useState(params)
-
-  // Show toast when redirected from /admin due to missing admin role
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const url = new URL(window.location.href)
-    if (url.searchParams.get('forbidden') === '1') {
-      toast({
-        variant: 'destructive',
-        title: '无管理员权限',
-        description: '您的账号没有管理员权限，已为您跳转至资料库',
-      })
-      // Clean the flag from the URL without triggering a navigation
-      window.history.replaceState({}, '', '/materials')
-    }
-  }, [])
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['materials', committedParams],

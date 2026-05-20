@@ -69,6 +69,7 @@ export interface UpdateProfilePayload {
 export type MaterialStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'OFFLINE'
 export type MaterialVisibility = 'PUBLIC' | 'PRIVATE'
 export type MaterialSort = 'latest' | 'relevance' | 'downloads' | 'rating'
+export type MaterialKind = 'EXERCISE' | 'HANDOUT' | 'EXAM' | 'MOCK'
 
 export interface Material {
   id: string
@@ -77,6 +78,7 @@ export interface Material {
   stage?: string | null
   grade?: string | null
   subject?: string | null
+  kind?: MaterialKind | null
   year?: number | null
   region?: string | null
   fileKey?: string
@@ -102,6 +104,7 @@ export interface MaterialListItem
     | 'stage'
     | 'grade'
     | 'subject'
+    | 'kind'
     | 'year'
     | 'region'
     | 'visibility'
@@ -110,6 +113,23 @@ export interface MaterialListItem
     | 'download_count'
     | 'uploader'
   > {}
+
+// Minimal shape consumed by the DirB list-row view (<MaterialRow>). It is the
+// common denominator of /materials list items, /favorites entries and
+// /materials/recommend results, which expose slightly different fields.
+export interface MaterialRowItem {
+  id: string
+  title: string
+  description?: string | null
+  stage?: string | null
+  grade?: string | null
+  subject?: string | null
+  kind?: MaterialKind | null
+  year?: number | null
+  region?: string | null
+  avg_score?: number | null
+  download_count?: number
+}
 
 // ─── Rating ──────────────────────────────────────────────────────────────────
 
