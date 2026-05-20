@@ -15,7 +15,7 @@ import {
   STAGES,
   SUBJECTS,
 } from './constants'
-import { SchoolPicker } from './school-picker'
+import { SchoolCombobox } from './school-combobox'
 
 interface OnboardingFormProps {
   initialValue?: Profile | null
@@ -184,7 +184,7 @@ export function OnboardingForm({ initialValue, editing = false, onSaved }: Onboa
 
       <div className="space-y-1.5">
         <Label>学校</Label>
-        <SchoolPicker
+        <SchoolCombobox
           city={draft.city}
           selected={draft.school}
           freeText={draft.schoolNameFreeText}

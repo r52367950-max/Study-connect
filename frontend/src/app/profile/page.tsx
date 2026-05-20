@@ -1,13 +1,15 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
-import { User, Upload, Download, Settings } from 'lucide-react'
+import { User, Upload, Download, Settings, ChevronDown } from 'lucide-react'
 import { getMe } from '@/lib/api/auth'
 import { getMaterials } from '@/lib/api/materials'
 import { useAuth } from '@/hooks/use-auth'
+import { useProfile } from '@/hooks/use-profile'
+import { OnboardingForm } from '@/components/onboarding/onboarding-form'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -16,7 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { MaterialCard } from '@/components/materials/material-card'
 import { EmptyState } from '@/components/shared/empty-state'
 import { PageLoader } from '@/components/shared/loading-spinner'
-import { formatDate } from '@/lib/utils'
+import { formatDate, cn } from '@/lib/utils'
 import { identifierLabel } from '@/lib/user-display'
 
 export default function ProfilePage() {
@@ -98,6 +100,40 @@ export default function ProfilePage() {
           />
         </TabsContent>
       </Tabs>
+
+      {/* Onboarding profile editor */}
+      <EditOnboardingSection />
+    </div>
+  )
+}
+
+function EditOnboardingSection() {
+  const [open, setOpen] = useState(false)
+  const { data: profile } = useProfile()
+
+  return (
+    <div className="space-y-3">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between rounded-lg border bg-card px-4 py-3 text-left shadow-sm transition-colors hover:bg-accent/40"
+      >
+        <span className="flex items-center gap-2 text-sm font-medium">
+          <Settings className="h-4 w-4 text-muted-foreground" />
+          修改入职信息
+        </span>
+        <ChevronDown
+          className={cn('h-4 w-4 text-muted-foreground transition-transform', open && 'rotate-180')}
+        />
+      </button>
+      {open &&
+        (profile ? (
+          <OnboardingForm editing initialValue={profile} />
+        ) : (
+          <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground shadow-sm">
+            加载中…
+          </div>
+        ))}
     </div>
   )
 }
