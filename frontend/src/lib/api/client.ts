@@ -75,13 +75,13 @@ apiClient.interceptors.request.use(async (config) => {
 // ─── 403 handler (exported for unit testing) ─────────────────────────────────
 /**
  * Handles a 403 response based on which endpoint was called.
- * - /admin/* → redirect to /materials?forbidden=1 (admin guard feedback)
+ * - /admin/* → redirect to /?forbidden=1 (admin guard feedback)
  * - others   → no redirect; error propagates to the calling component
  */
 export function handle403(requestUrl: string): void {
   if (typeof window === 'undefined') return
   if (requestUrl.startsWith('/admin')) {
-    window.location.href = '/materials?forbidden=1'
+    window.location.href = '/?forbidden=1'
   }
   // Non-admin 403: let getErrorMessage('无访问权限') surface in the component
 }

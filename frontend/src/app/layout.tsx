@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import { Providers } from './providers'
-import { Navbar } from '@/components/layout/navbar'
+import { SiteShell } from '@/components/layout/site-shell'
 
 export const metadata: Metadata = {
   title: {
@@ -16,13 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="zh-CN" suppressHydrationWarning>
       <body>
         <Providers>
-          <Navbar />
-          <main className="mx-auto min-h-[calc(100vh-3.5rem)] max-w-7xl px-4 py-6 sm:px-6">
-            {children}
-          </main>
-          <footer className="border-t py-6 text-center text-xs text-muted-foreground">
-            © {new Date().getFullYear()} StudyConnect · 学习资料共享平台
-          </footer>
+          <SiteShell>{children}</SiteShell>
         </Providers>
       </body>
     </html>

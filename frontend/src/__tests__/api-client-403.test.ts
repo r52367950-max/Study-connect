@@ -5,7 +5,7 @@
  *
  * Covers:
  *   c) API returns 403 → unified handling logic:
- *      - /admin endpoint 403  → redirect to /materials?forbidden=1
+ *      - /admin endpoint 403  → redirect to /?forbidden=1
  *      - other endpoint 403   → no redirect (error propagates to component)
  */
 import { describe, it, expect, beforeEach } from 'vitest'
@@ -31,14 +31,14 @@ describe('handle403()', () => {
   })
 
   // ── Admin endpoint 403 triggers redirect ────────────────────────────────────
-  it('redirects to /materials?forbidden=1 for /admin endpoint 403', () => {
+  it('redirects to /?forbidden=1 for /admin endpoint 403', () => {
     handle403('/admin/materials/pending')
-    expect(capturedHref).toBe('/materials?forbidden=1')
+    expect(capturedHref).toBe('/?forbidden=1')
   })
 
   it('redirects for any /admin sub-path', () => {
     handle403('/admin/materials/abc-123/approve')
-    expect(capturedHref).toBe('/materials?forbidden=1')
+    expect(capturedHref).toBe('/?forbidden=1')
   })
 
   // ── Non-admin endpoint 403 does NOT redirect ─────────────────────────────────
