@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { Sidebar } from '@/components/layout/sidebar'
 import { Topbar } from '@/components/layout/topbar'
+import { CommandPalette } from '@/components/shared/command-palette'
 import { toast } from '@/components/ui/use-toast'
 
 const DIRB_ENABLED = process.env.NEXT_PUBLIC_DIRB_ENABLED !== 'false'
@@ -35,6 +36,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <Topbar />
         <main className="flex-1 overflow-y-auto px-6 py-6">{children}</main>
       </div>
+      <CommandPalette />
     </div>
   )
 }

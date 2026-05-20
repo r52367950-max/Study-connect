@@ -3,10 +3,11 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BookOpen, Home, TrendingUp, Star, ChevronRight, LogIn } from 'lucide-react'
+import { BookOpen, Home, TrendingUp, Star, ChevronRight, LogIn, Search } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
 import { useProfile } from '@/hooks/use-profile'
 import { useFavorites } from '@/hooks/use-favorites'
+import { useCommandPaletteStore } from '@/lib/command-palette-store'
 import { SUBJECTS, STAGES, GRADES_BY_STAGE } from '@/components/onboarding/constants'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { identifierLabel } from '@/lib/user-display'
@@ -32,6 +33,7 @@ export function Sidebar() {
   const { isLoggedIn, user } = useAuth()
   const { data: profile } = useProfile()
   const { data: favorites } = useFavorites()
+  const setCommandOpen = useCommandPaletteStore((s) => s.setOpen)
   const [openStages, setOpenStages] = useState<Record<string, boolean>>({})
 
   const navItem = (href: string, label: string, icon: React.ReactNode, badge?: number) => {
@@ -62,6 +64,17 @@ export function Sidebar() {
         </div>
         <span className="text-[15px]">StudyConnect</span>
       </Link>
+
+      {/* Search trigger (opens ⌘K command palette) */}
+      <button
+        type="button"
+        onClick={() => setCommandOpen(true)}
+        className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-input bg-muted/30 px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted/60"
+      >
+        <Search className="h-3.5 w-3.5" />
+        <span className="flex-1 text-left">搜索资料…</span>
+        <kbd className="rounded border bg-background px-1 text-[10px]">⌘K</kbd>
+      </button>
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-2 pb-4">
