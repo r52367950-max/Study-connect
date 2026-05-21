@@ -19,8 +19,11 @@ import {
 import { toast } from '@/components/ui/use-toast'
 import { cn } from '@/lib/utils'
 
-// Dismissed for the rest of this JS session — set on "暂不" or a successful upgrade.
-let dismissedThisSession = false
+// Suppressed for the rest of this JS session, keyed by user id — set on "暂不"
+// or a successful upgrade. Keying by id keeps a dismissal on one account from
+// silencing the prompt for another (logout → login as a different user in the
+// same SPA session, without a full page reload).
+const dismissedUserIds = new Set<string>()
 
 export function GradeUpgradeDialog() {
   const { isLoggedIn } = useAuth()
@@ -29,12 +32,16 @@ export function GradeUpgradeDialog() {
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState<'promote' | 'graduate'>('promote')
   const [archiveGraduating, setArchiveGraduating] = useState<boolean | null>(null)
-  const evaluated = useRef(false)
+  // The user id we last evaluated, so a new profile (after a user switch) is
+  // evaluated once while the same profile isn't re-evaluated. Stays null until a
+  // profile arrives, so an async-loaded profile still gets its single check.
+  const evaluatedFor = useRef<string | null>(null)
 
   useEffect(() => {
-    if (evaluated.current || !isLoggedIn || !profile) return
-    evaluated.current = true
-    if (dismissedThisSession) return
+    if (!isLoggedIn || !profile) return
+    if (evaluatedFor.current === profile.id) return
+    evaluatedFor.current = profile.id
+    if (dismissedUserIds.has(profile.id)) return
     if (shouldPromptGradeUpgrade(profile, new Date())) setOpen(true)
   }, [isLoggedIn, profile])
 
@@ -42,7 +49,7 @@ export function GradeUpgradeDialog() {
     mutationFn: (grades: string[]) => updateMyProfile({ grades }),
     onSuccess: (updated) => {
       queryClient.setQueryData(['profile'], updated)
-      dismissedThisSession = true
+      dismissedUserIds.add(updated.id)
       setOpen(false)
       toast({ title: '已升级到新学年', description: '推荐将按更新后的年级为你刷新' })
     },
@@ -56,7 +63,7 @@ export function GradeUpgradeDialog() {
   const hasGraduating = plan.graduating.length > 0
 
   const dismiss = () => {
-    dismissedThisSession = true
+    dismissedUserIds.add(profile.id)
     setOpen(false)
   }
 
