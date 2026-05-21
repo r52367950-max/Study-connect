@@ -11,13 +11,13 @@
 | 编号 | 内容 | 状态 | 关联 PR / 备注 |
 |---|---|---|---|
 | 阶段 1 | 后端基础扩展（Prisma profile/Favorites/Schools/ViewEvents、OTP、推荐打分、seed） | ✅ 已完成（已 merge） | PR #48（`claude/check-design-access-JDMor`）+ `44bd4a9` / `cbcf537` / `254974c` |
-| 阶段 2 | 前端入职流程 + 双标识登录（邮箱/手机 OTP）+ UserCtx → Zustand | ⬜ 未开始 ← **当前起点** | 开发分支 `claude/check-design-access-JDMor` |
-| 阶段 3 | DirB shell + 5 页移植（破坏性覆盖 `/materials`，新增 `(app)` 路由组） | ⬜ 未开始 | |
-| 阶段 4 | HANDOFF P0：学校 autocomplete + ⌘K 命令面板 + 真实分页接入 | ⬜ 未开始 | |
-| 阶段 5 | HANDOFF P1+P2：切页 loading/动效/年级升级/响应式 + 推荐算法升级 + 协同隐私 + 浏览埋点 | ⬜ 未开始 | |
-| 阶段 6 | HANDOFF P3：正式退出登录 + 空状态插画 + 微信 OAuth + 组卷导出 PDF/Word | ⬜ 未开始 | |
-| 工作流 S | 安全与稳定性加固（含生产部署前必修红线） | ⬜ 未开始 | 见 §S；改动仍走安全门禁 |
-| 工作流 P | 性能与平台化（搜索 / 缓存 / Node 22 / 推荐冷启动 / 监控） | 🔄 进行中（P5 已完成：Pino + Sentry + /health；metrics 后续） | ranker_v1 / ranker_v2 可切换，见 §P3 |
+| 阶段 2 | 前端入职流程 + 双标识登录（邮箱/手机 OTP）+ UserCtx → Zustand | ✅ 已完成（已 merge） | 开发分支 `claude/check-design-access-JDMor` |
+| 阶段 3 | DirB shell + 5 页移植（破坏性覆盖 `/materials`，新增 `(app)` 路由组） | ✅ 已完成（已 merge） | PR #71（commit `3f0a129`） |
+| 阶段 4 | HANDOFF P0：学校 autocomplete + ⌘K 命令面板 + 真实分页接入 | ✅ 已完成（已 merge，已验收） | PR #72（commit `db397cb`） |
+| 阶段 5 | HANDOFF P1+P2：切页 loading/动效/年级升级/响应式 + 推荐算法升级 + 协同隐私 + 浏览埋点 | ✅ 已完成（已 merge，已验收） | PR #73（commit `5acda5b`）；后端推荐引擎（5.6/5.7 + P3 冷启动）随工作流 P 先期落地；余低级打磨项见 review（年级弹窗跨用户抑制、dwell 抽取等） |
+| 阶段 6 | HANDOFF P3：正式退出登录 + 空状态插画 + 微信 OAuth + 组卷导出 PDF/Word | ⬜ 未开始 ← **当前起点** | 最重一阶段，建议拆分：6.1+6.2 轻量包先行；6.3 微信需 ICP 备案 + 安全门禁；6.4 组卷依赖 Redis/BullMQ（工作流 P2） |
+| 工作流 S | 安全与稳定性加固（含生产部署前必修红线） | ⬜ 未开始 | 见 §S；S1–S3 红线宜在 6.3（改 auth）前清 |
+| 工作流 P | 性能与平台化（搜索 / 缓存 / Node 22 / 推荐冷启动 / 监控） | 🔄 进行中（P5 已完成：Pino + Sentry + /health；P3 推荐冷启动 phase-0~3 已落地；Redis/队列/metrics 后续） | 推荐响应已回传 `rankerId`、`?ranker=` 已接入；`ranker_v2` 目前为同算法占位（无独立打分），见 §P3 |
 
 状态图例：⬜ 未开始 / 🔄 进行中 / ✅ 已完成。
 
@@ -66,7 +66,7 @@
 
 ---
 
-## 阶段 2：前端入职流程 + 双标识登录 ← 当前起点
+## 阶段 2：前端入职流程 + 双标识登录 ✅ 已完成
 
 ### 2.1 登录页改造 — `frontend/src/app/(auth)/login/page.tsx`
 - 顶部 Tab「邮箱登录 / 手机号登录」决定提交字段名 `email` 或 `phone`。
@@ -94,7 +94,7 @@
 
 ---
 
-## 阶段 3：DirB shell + 5 页移植（破坏性）
+## 阶段 3：DirB shell + 5 页移植（破坏性） ✅ 已完成
 
 ### 3.1 路由覆盖
 - 删除 `frontend/src/app/materials/page.tsx` 现有 grid，改为 DirB「全部资料」子页（保留 `/materials` URL）。
@@ -143,7 +143,7 @@
 
 ---
 
-## 阶段 4：HANDOFF P0
+## 阶段 4：HANDOFF P0 ✅ 已完成
 
 ### 4.1 学校 autocomplete
 - 后端 `GET /schools?city&q&limit` 已开；本阶段补：拼音首字母搜索（seed 时用 `pinyin` npm 包预计算，仅 seed 脚本用）、限频 + 分页、"找不到我的学校"兜底（前端跳自由输入，写 `schoolNameFreeText`，`schoolId` 留空，后台审核合并）。
@@ -160,7 +160,7 @@
 
 ---
 
-## 阶段 5：HANDOFF P1 + P2
+## 阶段 5：HANDOFF P1 + P2 ✅ 已完成
 
 ### 5.1 切页 loading + 动效一致
 - Tailwind 加 `transitionTimingFunction['ease-rise'] = cubic-bezier(0.2,0.7,0.2,1)`；各 `page.tsx` 用 Suspense + 自定义 fallback（100ms 延迟显示 skeleton，切完淡入 200ms）；欢迎 toast 与 page transition 复用同一缓动。
@@ -194,7 +194,7 @@
 
 ---
 
-## 阶段 6：HANDOFF P3
+## 阶段 6：HANDOFF P3 ← 当前起点
 
 ### 6.1 正式退出登录
 - 删原型右下角"↻ 重新体验"；侧栏底部用户卡 `⋮` → Radix `DropdownMenu`：「个人中心」→ `/profile`，「修改入职信息」→ `/profile/onboarding`（复用 `<OnboardingForm editing>`），「退出登录」→ `POST /auth/logout`（已存在）+ `clearAuth()` + `router.replace('/login')`。
