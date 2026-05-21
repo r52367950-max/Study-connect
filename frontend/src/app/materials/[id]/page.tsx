@@ -7,12 +7,8 @@ import { useQuery } from '@tanstack/react-query'
 import { Download, Star, ChevronRight, FileText, Calendar, MapPin, User } from 'lucide-react'
 import type { MaterialKind } from '@/types'
 import { getMaterial, downloadMaterial } from '@/lib/api/materials'
-import {
-  CSRF_HEADER_NAME,
-  ensureCsrfToken,
-  getCsrfTokenFromCookie,
-  getErrorMessage,
-} from '@/lib/api/client'
+import { reportDwellEvent } from '@/lib/api/view-events'
+import { ensureCsrfToken, getErrorMessage } from '@/lib/api/client'
 import { useAuth } from '@/hooks/use-auth'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -56,25 +52,11 @@ export default function MaterialDetailPage() {
       if (reported) return
       const dwellMs = Date.now() - startedAt
       if (dwellMs < 500) return
-      const token = getCsrfTokenFromCookie()
-      if (!token) return
-      reported = true
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
-      // keepalive (not sendBeacon) so the CSRF header survives page unload.
-      void fetch(`${baseUrl}/view-events`, {
-        method: 'POST',
-        keepalive: true,
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          [CSRF_HEADER_NAME]: token,
-        },
-        body: JSON.stringify({
-          materialId: id,
-          kind: dwellKindRef.current ?? undefined,
-          dwellMs: Math.min(dwellMs, 60 * 60 * 1000),
-        }),
-      }).catch(() => undefined)
+      // Mark reported only once the ping is actually dispatched — a missing CSRF
+      // cookie returns false, leaving a later unload event free to retry.
+      if (reportDwellEvent({ materialId: id, kind: dwellKindRef.current, dwellMs })) {
+        reported = true
+      }
     }
 
     const onVisibilityChange = () => {

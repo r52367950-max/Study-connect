@@ -31,6 +31,24 @@ describe('shouldPromptGradeUpgrade', () => {
     ).toBe(false)
   })
 
+  it('does not prompt when updated exactly at the Aug 1 (UTC) cutoff', () => {
+    expect(
+      shouldPromptGradeUpgrade(
+        { grades: ['初三'], gradesUpdatedAt: '2026-08-01T00:00:00.000Z' },
+        september,
+      ),
+    ).toBe(false)
+  })
+
+  it('prompts when last updated Jul 31, just before the Aug 1 (UTC) cutoff', () => {
+    expect(
+      shouldPromptGradeUpgrade(
+        { grades: ['初二'], gradesUpdatedAt: '2026-07-31T23:59:59.999Z' },
+        september,
+      ),
+    ).toBe(true)
+  })
+
   it('does not prompt when there are no grades to upgrade', () => {
     expect(shouldPromptGradeUpgrade({ grades: [], gradesUpdatedAt: null }, september)).toBe(false)
     expect(shouldPromptGradeUpgrade(null, september)).toBe(false)

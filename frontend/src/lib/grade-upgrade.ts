@@ -9,6 +9,9 @@ interface GradeUpgradeUser {
  * Whether to prompt the user to bump their grades for the new school year.
  * Pure (no persistence): true only in/after September (`getMonth()` is 0-based)
  * when grades haven't already been updated on/after Aug 1 of the current year.
+ * The Aug 1 cutoff is built in UTC so it compares consistently against the ISO
+ * instant in `gradesUpdatedAt` (avoids a spurious prompt in the hours around the
+ * boundary, where a local-time cutoff and a UTC instant could disagree).
  */
 export function shouldPromptGradeUpgrade(
   user: GradeUpgradeUser | null | undefined,
@@ -17,7 +20,7 @@ export function shouldPromptGradeUpgrade(
   if (!user || user.grades.length === 0) return false
   if (now.getMonth() < 8) return false
   if (!user.gradesUpdatedAt) return true
-  return new Date(user.gradesUpdatedAt) < new Date(now.getFullYear(), 7, 1)
+  return new Date(user.gradesUpdatedAt).getTime() < Date.UTC(now.getFullYear(), 7, 1)
 }
 
 export interface GradeUpgradePlan {

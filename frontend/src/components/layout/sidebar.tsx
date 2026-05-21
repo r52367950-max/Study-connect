@@ -227,6 +227,19 @@ export function MobileSidebar() {
   const mobileOpen = useSidebarStore((s) => s.mobileOpen)
   const setMobileOpen = useSidebarStore((s) => s.setMobileOpen)
 
+  // Close the drawer once the viewport reaches `lg` (where the inline rail takes
+  // over). Otherwise resizing a wide-open drawer up to desktop leaves the
+  // overlay + Radix focus trap lingering over the desktop layout.
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)')
+    const closeIfDesktop = () => {
+      if (mq.matches) setMobileOpen(false)
+    }
+    closeIfDesktop()
+    mq.addEventListener('change', closeIfDesktop)
+    return () => mq.removeEventListener('change', closeIfDesktop)
+  }, [setMobileOpen])
+
   return (
     <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
       <SheetContent side="left" className="w-72 p-0">
