@@ -2,15 +2,36 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { BookOpen, Home, TrendingUp, Star, ChevronRight, LogIn, Search } from 'lucide-react'
+import { usePathname, useRouter } from 'next/navigation'
+import {
+  BookOpen,
+  Home,
+  TrendingUp,
+  Star,
+  ChevronRight,
+  LogIn,
+  Search,
+  MoreVertical,
+  User,
+  Settings,
+  LogOut,
+} from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
 import { useProfile } from '@/hooks/use-profile'
 import { useFavorites } from '@/hooks/use-favorites'
+import { logout as logoutApi } from '@/lib/api/auth'
+import { useAuthStore } from '@/lib/auth-store'
 import { useCommandPaletteStore } from '@/lib/command-palette-store'
 import { useSidebarStore } from '@/lib/sidebar-store'
 import { SUBJECTS, STAGES, GRADES_BY_STAGE } from '@/components/onboarding/constants'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { identifierLabel } from '@/lib/user-display'
 import { cn } from '@/lib/utils'
@@ -29,6 +50,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
  */
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
+  const router = useRouter()
   const decoded = (() => {
     try {
       return decodeURIComponent(pathname)
@@ -76,6 +98,21 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         )}
       </Link>
     )
+  }
+
+  // Reuse the existing logout endpoint (bumps tokenVersion + clears cookies),
+  // then clear local auth and redirect. Always redirect even if the request
+  // fails, so a network hiccup can't strand the user in a logged-in shell.
+  const handleLogout = async () => {
+    onNavigate?.()
+    try {
+      await logoutApi()
+    } catch {
+      // ignore — fall through to clear local state and redirect
+    } finally {
+      useAuthStore.getState().clearAuth()
+      router.replace('/login')
+    }
   }
 
   return (
@@ -181,23 +218,66 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       {/* User footer */}
       <div className="border-t p-3">
         {isLoggedIn ? (
-          <Link
-            href="/profile"
-            onClick={onNavigate}
-            className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent/60"
-          >
-            <Avatar className="h-7 w-7">
-              <AvatarFallback className="bg-foreground text-xs text-background">
-                {(profile?.displayName ?? user?.username ?? 'U').slice(0, 2).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{profile?.displayName ?? user?.username}</p>
-              {user && (
-                <p className="truncate text-xs text-muted-foreground">{identifierLabel(user)}</p>
-              )}
-            </div>
-          </Link>
+          <div className="flex items-center gap-1">
+            <Link
+              href="/profile"
+              onClick={onNavigate}
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent/60"
+            >
+              <Avatar className="h-7 w-7">
+                <AvatarFallback className="bg-foreground text-xs text-background">
+                  {(profile?.displayName ?? user?.username ?? 'U').slice(0, 2).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{profile?.displayName ?? user?.username}</p>
+                {user && (
+                  <p className="truncate text-xs text-muted-foreground">{identifierLabel(user)}</p>
+                )}
+              </div>
+            </Link>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="用户菜单"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" side="top" sideOffset={8} className="w-48">
+                <DropdownMenuItem
+                  onSelect={() => {
+                    onNavigate?.()
+                    router.push('/profile')
+                  }}
+                >
+                  <User className="h-4 w-4" />
+                  个人中心
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    onNavigate?.()
+                    router.push('/profile#onboarding')
+                  }}
+                >
+                  <Settings className="h-4 w-4" />
+                  修改入职信息
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={() => {
+                    void handleLogout()
+                  }}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <LogOut className="h-4 w-4" />
+                  退出登录
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         ) : (
           <Link
             href="/login"

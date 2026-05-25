@@ -111,8 +111,25 @@ function EditOnboardingSection() {
   const [open, setOpen] = useState(false)
   const { data: profile } = useProfile()
 
+  // Open + scroll to this section when reached via `/profile#onboarding`
+  // (the sidebar "修改入职信息" menu item).
+  useEffect(() => {
+    const applyHash = () => {
+      if (window.location.hash !== '#onboarding') return
+      setOpen(true)
+      requestAnimationFrame(() => {
+        document
+          .getElementById('onboarding')
+          ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      })
+    }
+    applyHash()
+    window.addEventListener('hashchange', applyHash)
+    return () => window.removeEventListener('hashchange', applyHash)
+  }, [])
+
   return (
-    <div className="space-y-3">
+    <div id="onboarding" className="scroll-mt-24 space-y-3">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

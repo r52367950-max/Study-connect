@@ -9,13 +9,14 @@ import { MaterialRow } from './material-row'
 import { MaterialRowListSkeleton } from './material-skeletons'
 import { ContentTransition } from '@/components/shared/page-transition'
 import { LoadingSpinner } from '@/components/shared/loading-spinner'
-import { EmptyState } from '@/components/shared/empty-state'
+import { EmptyState, type EmptyStateVariant } from '@/components/shared/empty-state'
 import { ErrorState } from '@/components/shared/error-state'
 
 const PAGE_SIZE = 20
 
 interface MaterialInfiniteListProps {
   params?: Omit<MaterialSearchParams, 'page' | 'pageSize'>
+  emptyVariant?: EmptyStateVariant
   emptyTitle?: string
   emptyDescription?: string
   emptyAction?: React.ReactNode
@@ -23,6 +24,7 @@ interface MaterialInfiniteListProps {
 
 export function MaterialInfiniteList({
   params = {},
+  emptyVariant,
   emptyTitle = '暂无资料',
   emptyDescription,
   emptyAction,
@@ -70,6 +72,7 @@ export function MaterialInfiniteList({
         <ErrorState message={getErrorMessage(error)} onRetry={() => refetch()} className="py-20" />
       ) : items.length === 0 ? (
         <EmptyState
+          variant={emptyVariant}
           title={emptyTitle}
           description={emptyDescription}
           action={emptyAction}

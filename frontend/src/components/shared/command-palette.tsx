@@ -16,6 +16,8 @@ import {
   CommandList,
   CommandLoading,
 } from '@/components/ui/command'
+import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/shared/empty-state'
 
 const RECENT_KEY = 'sc-recent-searches'
 const MAX_RECENT = 5
@@ -160,12 +162,17 @@ export function CommandPalette() {
               </CommandGroup>
             )}
             {!isFetching && materials.length === 0 && (
-              <CommandGroup heading="资料">
-                <CommandItem value="materials-empty" onSelect={() => go('/upload')}>
-                  <Upload className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="truncate">没有找到相关资料，试试上传一份？</span>
-                </CommandItem>
-              </CommandGroup>
+              <EmptyState
+                size="sm"
+                variant="search"
+                title={`没有找到「${debounced}」相关资料`}
+                action={
+                  <Button size="sm" onClick={() => go('/upload')}>
+                    <Upload className="mr-1.5 h-3.5 w-3.5" />
+                    直接上传同名资料
+                  </Button>
+                }
+              />
             )}
           </>
         )}
