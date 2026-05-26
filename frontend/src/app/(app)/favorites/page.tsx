@@ -37,11 +37,13 @@ export default function PageFav() {
           <ErrorState message={getErrorMessage(error)} onRetry={() => refetch()} className="py-20" />
         ) : !data || data.length === 0 ? (
           <EmptyState
-            title="还没有收藏，去首页看看？"
+            variant="favorites"
+            title="还没有收藏"
+            description="收藏喜欢的资料，方便随时回看"
             className="py-16"
             action={
               <Button size="sm" onClick={() => router.push('/')}>
-                去首页
+                去浏览资料
               </Button>
             }
           />

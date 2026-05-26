@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
+import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
 import { getMaterials } from '@/lib/api/materials'
 import { getErrorMessage } from '@/lib/api/client'
@@ -8,6 +9,7 @@ import type { MaterialSearchParams } from '@/types'
 import { MaterialCard } from '@/components/materials/material-card'
 import { MaterialCardGridSkeleton } from '@/components/materials/material-skeletons'
 import { FilterBar } from '@/components/materials/filter-bar'
+import { Button } from '@/components/ui/button'
 import { Pagination } from '@/components/shared/pagination'
 import { ContentTransition } from '@/components/shared/page-transition'
 import { EmptyState } from '@/components/shared/empty-state'
@@ -47,6 +49,18 @@ export default function MaterialsPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }, [])
 
+  const handleResetFilters = useCallback(() => {
+    const reset: MaterialSearchParams = { page: 1, pageSize: DEFAULT_PAGE_SIZE, sort: 'latest' }
+    setParams(reset)
+    setCommittedParams(reset)
+  }, [])
+
+  const hasActiveFilters = !!(
+    committedParams.q ||
+    committedParams.stage ||
+    committedParams.subject
+  )
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -70,9 +84,22 @@ export default function MaterialsPage() {
           />
         ) : !data?.items.length ? (
           <EmptyState
+            variant="search"
             title="未找到相关资料"
-            description="换个关键词或筛选条件试试"
+            description="换个关键词或筛选条件，或上传一份新资料"
             className="py-20"
+            action={
+              <>
+                {hasActiveFilters && (
+                  <Button variant="outline" size="sm" onClick={handleResetFilters}>
+                    清除筛选
+                  </Button>
+                )}
+                <Button asChild size="sm">
+                  <Link href="/upload">上传一份</Link>
+                </Button>
+              </>
+            }
           />
         ) : (
           <div className="space-y-6">
