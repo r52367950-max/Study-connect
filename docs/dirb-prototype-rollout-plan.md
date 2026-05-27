@@ -16,7 +16,7 @@
 | 阶段 4 | HANDOFF P0：学校 autocomplete + ⌘K 命令面板 + 真实分页接入 | ✅ 已完成（已 merge，已验收） | PR #72（commit `db397cb`） |
 | 阶段 5 | HANDOFF P1+P2：切页 loading/动效/年级升级/响应式 + 推荐算法升级 + 协同隐私 + 浏览埋点 | ✅ 已完成（已 merge，已验收） | PR #73（commit `5acda5b`）；后端推荐引擎（5.6/5.7 + P3 冷启动）随工作流 P 先期落地；余低级打磨项见 review（年级弹窗跨用户抑制、dwell 抽取等） |
 | 阶段 6 | HANDOFF P3：正式退出登录 + 空状态插画 + 微信 OAuth + 组卷导出 PDF/Word | ⬜ 未开始 ← **当前起点** | 最重一阶段，建议拆分：6.1+6.2 轻量包先行；6.3 微信需 ICP 备案 + 安全门禁；6.4 组卷依赖 Redis/BullMQ（工作流 P2） |
-| 工作流 S | 安全与稳定性加固（含生产部署前必修红线） | ⬜ 未开始 | 见 §S；S1–S3 红线宜在 6.3（改 auth）前清 |
+| 工作流 S | 安全与稳定性加固（含生产部署前必修红线） | 🔄 进行中（S1/S3/S4/S5/S6/S7/S9/S10 大部分已在代码落地；S2/S8 有残留 bug；S-data/CI-net 新发现待修） | 全量代码审计（4 域）确认 S1–S10 大部分已实现；6 个残留/新问题待 round-2 修复：S2a TRUST_PROXY 门控反直觉、S2b 手机号限流不归一化、S2c 登录锁无 IP 维度（待评估）、S8b file-scan 终态一律错标 TIMEOUT、S-data `buildApprovedWhere` 缺扫描状态过滤、CI-net `min-admin-review` 漏 OTP bypass → CI 假绿；见 §S 末尾详情 |
 | 工作流 P | 性能与平台化（搜索 / 缓存 / Node 22 / 推荐冷启动 / 监控） | 🔄 进行中（P5 已完成：Pino + Sentry + /health；P3 推荐冷启动 phase-0~3 已落地；Redis/队列/metrics 后续） | 推荐响应已回传 `rankerId`、`?ranker=` 已接入；`ranker_v2` 目前为同算法占位（无独立打分），见 §P3 |
 
 状态图例：⬜ 未开始 / 🔄 进行中 / ✅ 已完成。
@@ -245,6 +245,29 @@
 | S11 | 🟡 | 限流 / OTP 计数迁 Redis | 见工作流 P §P2（多实例正确性 + 重启不丢）。 |
 
 已确认**没问题**、不必动的（审计结论）：SQL 注入（全 Prisma；唯一 `$queryRaw` 用 `Prisma.sql` + `::uuid` 参数化）、批量赋值（全局 `whitelist`+`forbidNonWhitelisted` + 逐字段构造 `data`）、IDOR（按 `req.user.id` 收口）、会话固定（无状态 JWT）、信息泄露（生产隐藏 5xx 文案 + `disableErrorMessages` + Swagger 关 + 通用 "Invalid credentials"）、`alg` 混淆（恒用 HMAC-SHA256 重算比对，`alg:none` 无效）、`npm audit` 根工程 0 漏洞、Next 14.2.29 已过 CVE-2025-29927。低危取舍（不强制改）：用户枚举（register / otp/send 对不存在标识也响应）、CSRF token 未绑会话（双提交模式仍成立）、refresh token 不可单独吊销（只有全局 `tokenVersion`）。
+
+### 全量代码审计结论（2026-05，4 域 Opus 扫描）
+
+**已在代码落地的条目**（与上方 S1–S11 计划表对照）：
+- **S1** ✅：`src/common/security/secret-strength.ts` + `main.ts` `assertSecretStrength`；长度 ≥32 + 非占位符双重断言，不达则拒启。
+- **S3** ✅：`main.ts` `assertCorsConfigInProduction`；生产环境 `CORS_ORIGIN` 非空、全 https、cookie `secure` 不达则拒启。
+- **S4** ✅：`auth.service.ts` `const scryptAsync = promisify(scrypt)`；登录/注册/改密全走异步哈希。
+- **S5** ✅：`main.ts` `applySecurityHeaders` 中 `Strict-Transport-Security: max-age=63072000; includeSubDomains`。
+- **S6** ✅：`otp.service.ts` 已有每标识日上限；`AUTH_OTP_TEST_BYPASS=true` 时打 loud warning。
+- **S7** ✅：`auth.controller.ts` 已改用 refresh-token 取 `sub` + `rotateTokenVersion`；access token 过期后 logout 仍有效。
+- **S9** ✅（部分）：`upload-security.util.ts` 文件名 sanitize；DTO 已有部分文本长度约束。
+- **S10** ✅：access token payload 已只含 `sub/role/ver`，无 email/phone 快照。
+
+**已有实现但存在残留 bug 或新发现问题（待 round-2 修复，目标分支 `claude/workflow-s2-*`）**：
+
+| 编号 | 严重度 | 问题 | 定位 |
+|---|---|---|---|
+| S2a | 🔴 | TRUST_PROXY 门控反直觉：guard 用 `Boolean(app.get('trust proxy'))` → `Boolean("0")===true`，本想关闭信任的值反而启用 XFF 分支 | `src/main.ts:36-43`、`src/common/rate-limit.guard.ts:114-122` |
+| S2b | 🟠 | 手机号限流不归一化：`extractIdentifier` 只 `trim()`，而 `auth.service` 用 `normalizePhone()`，格式变体落不同限流桶 | `src/common/rate-limit.guard.ts:124-136` |
+| S2c | 🟠 | 登录失败锁仅按标识、无 IP 维度 → 任意 IP 发 5 次错误凭据可循环锁受害者账号（需先评估并在 `docs/rate-limit-rules.md` 记录取舍） | `src/common/rate-limit.service.ts:116-118` |
+| S8b | 🟠 | file-scan 终态错标：catch 里无论真实原因一律 `TIMEOUT`；`FAILED` job 永不重试 → 资料永久 404 | `src/modules/materials/file-scan.service.ts:67-83` |
+| S-data | 🟠 | `buildApprovedWhere` 缺 `fileSafetyStatus` 过滤：列表/RATING 排序展示 `QUARANTINED/SCANNING/FAILED` 资料，点进去/下载却 404（死链 + 未过扫描元数据泄露） | `src/modules/materials/materials.service.ts:538` |
+| CI-net | 🔴 | `min-admin-review-check.ts` 漏 `AUTH_OTP_TEST_BYPASS=true` → 脚本失败；`security-gate.yml` `\| tee` 吞退出码 → CI 假绿；行 251 误判 401（应 403） | `scripts/min-admin-review-check.ts`、`.github/workflows/security-gate.yml` |
 
 ---
 
