@@ -22,9 +22,14 @@ interface MaterialRowProps {
 
 // One impression per material per session, shared across every <MaterialRow>
 // instance (recommendations + list + favorites) so the same card seen twice
-// isn't double-counted.
+// isn't double-counted. Cleared on logout / user switch (see providers.tsx) so
+// account B doesn't inherit A's "already-reported" dedup set.
 const reportedViewIds = new Set<string>()
 const IMPRESSION_DWELL_MS = 500
+
+export function resetReportedViewIds(): void {
+  reportedViewIds.clear()
+}
 
 export function MaterialRow({ material }: MaterialRowProps) {
   const router = useRouter()

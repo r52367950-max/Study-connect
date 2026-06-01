@@ -106,7 +106,10 @@ export class RecommendationsService {
       const cityMatch = contentEnabled && m.region && user.city && m.region === user.city ? 1.5 : 0;
       const kindMatch = contentEnabled && m.kind && viewedKindEnums.has(m.kind) ? 1 : 0;
       const popularityScore = Math.log10(downloads + 1) * 0.8;
-      const ratingScore = ((agg.avg ?? 4) - 4) * 2;
+      // Floor the rating contribution so a single sub-3 review can't push a
+      // material below an entirely-unrated one (`(1-4)*2 = -6` would dominate
+      // popularity/freshness signals in phase-0).
+      const ratingScore = Math.max(-2, ((agg.avg ?? 4) - 4) * 2);
       const freshnessScore = (m.year ?? 0) >= 2024 ? 0.6 : 0;
       const collaborativeScore = phase === 'phase-3' && user.collaborativeOptIn && colleagueSignals.has(m.id) ? 1.5 : 0;
       const score = phase === 'phase-0'
@@ -137,7 +140,15 @@ export class RecommendationsService {
   private async getDynamicViewedKinds(userId: string): Promise<string[]> {
     const nowMinus30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const grouped = await this.prisma.viewEvent.groupBy({ by: ['kind'], where: { userId, createdAt: { gt: nowMinus30d } }, _count: true });
-    return grouped.filter((g) => !!g.kind).sort((a,b)=>b._count-a._count).slice(0,2).map((g) => ({ EXERCISE:'习题', HANDOUT:'讲义', EXAM:'真题', MOCK:'模拟' }[g.kind!]));
+    const labelByKind: Record<string, string | undefined> = { EXERCISE: '习题', HANDOUT: '讲义', EXAM: '真题', MOCK: '模拟' };
+    return grouped
+      .filter((g) => !!g.kind)
+      .sort((a, b) => b._count - a._count)
+      .slice(0, 2)
+      .map((g) => labelByKind[g.kind!])
+      // Unknown kinds (future enum additions) map to undefined; filter them
+      // out so the return type's `string[]` doesn't carry `undefined`s.
+      .filter((k): k is string => !!k);
   }
 
   private async getSchoolOnboardedCount(schoolId: string): Promise<number> {

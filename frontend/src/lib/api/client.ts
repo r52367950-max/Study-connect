@@ -86,13 +86,30 @@ export function handle403(requestUrl: string): void {
   // Non-admin 403: let getErrorMessage('无访问权限') surface in the component
 }
 
+// Endpoints whose 401s must NOT trigger the global "clear auth + redirect to
+// /login" flow. These run in the background (impression / view-event pings)
+// where a stale access cookie is expected and silently dropping the ping is
+// the correct UX — otherwise scrolling a list after the 15-min access cookie
+// expires would "ghost-logout" the user mid-browse.
+const SILENT_401_PATHS = ['/view-events']
+
+function shouldSilenceUnauthorized(requestUrl: string | undefined): boolean {
+  if (!requestUrl) return false
+  try {
+    const parsed = new URL(requestUrl, apiClient.defaults.baseURL)
+    return SILENT_401_PATHS.some((path) => parsed.pathname === path || parsed.pathname.startsWith(`${path}/`))
+  } catch {
+    return SILENT_401_PATHS.some((path) => requestUrl === path || requestUrl.startsWith(`${path}/`))
+  }
+}
+
 // ─── Response: handle common error codes ─────────────────────────────────────
 apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
     const status = error.response?.status
 
-    if (status === 401) {
+    if (status === 401 && !shouldSilenceUnauthorized(error.config?.url)) {
       // Clear in-memory auth state and redirect to login
       if (typeof window !== 'undefined') {
         useAuthStore.getState().clearAuth()

@@ -6,6 +6,7 @@ import { useAuth } from '@/hooks/use-auth'
 import { useProfile } from '@/hooks/use-profile'
 import { OnboardingForm } from '@/components/onboarding/onboarding-form'
 import { toast } from '@/components/ui/use-toast'
+import { safeRedirect } from '@/lib/utils'
 
 function LoadingBox() {
   return (
@@ -26,7 +27,9 @@ export default function OnboardingPage() {
 function OnboardingPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const redirect = searchParams.get('redirect') ?? '/'
+  // safeRedirect rejects scheme/protocol-relative URLs so `?redirect=//evil.com`
+  // can't bounce a freshly-onboarded user to an attacker-controlled origin.
+  const redirect = safeRedirect(searchParams.get('redirect'))
   const { isLoggedIn, initialized } = useAuth()
   const { data: profile, isLoading } = useProfile()
 

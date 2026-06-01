@@ -16,7 +16,7 @@ export class SchoolsService {
       const q = query.q.trim();
       const lowered = q.toLowerCase();
       where.OR = [
-        { name: { contains: q } },
+        { name: { contains: q, mode: 'insensitive' } },
         { pinyin: { startsWith: lowered } },
       ];
     }

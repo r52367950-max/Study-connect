@@ -35,7 +35,7 @@ type ActionType = 'reject' | 'offline' | null
 
 export default function AdminPage() {
   const router = useRouter()
-  const { isLoggedIn, isAdmin } = useAuth()
+  const { isLoggedIn, isAdmin, initialized } = useAuth()
   const queryClient = useQueryClient()
 
   const [page, setPage] = useState(1)
@@ -43,11 +43,14 @@ export default function AdminPage() {
   const [actionType, setActionType] = useState<ActionType>(null)
   const [reason, setReason] = useState('')
 
-  // Admin guard
+  // Admin guard — wait for auth bootstrap to settle before deciding, otherwise
+  // a refresh on /admin briefly sees `isLoggedIn=false` and bounces to /login,
+  // even for an authenticated admin. (Matches profile/favorites pattern.)
   useEffect(() => {
+    if (!initialized) return
     if (!isLoggedIn) { router.replace('/login?redirect=/admin'); return }
-    if (isLoggedIn && !isAdmin) { router.replace('/'); return }
-  }, [isLoggedIn, isAdmin, router])
+    if (!isAdmin) { router.replace('/'); return }
+  }, [initialized, isLoggedIn, isAdmin, router])
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['admin', 'pending', page],

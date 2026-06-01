@@ -64,7 +64,7 @@ export default function UploadPage() {
         file,
       })
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
       toast({
         title: '上传成功',
         description: '资料已提交，等待管理员审核后公开',
