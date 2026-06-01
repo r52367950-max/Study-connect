@@ -1,20 +1,12 @@
 import { Module } from '@nestjs/common';
-import { HealthCheckService } from '@nestjs/terminus';
-import { PrismaModule, PrismaService } from '../../infra';
+import { TerminusModule } from '@nestjs/terminus';
+import { PrismaModule } from '../../infra';
 import { HealthController } from './health.controller';
-
-class PrismaHealthIndicator {
-  constructor(private readonly prisma: PrismaService) {}
-  async pingCheck(key: string) {
-    await this.prisma.$queryRaw`SELECT 1`;
-    return { [key]: { status: 'up' } };
-  }
-}
+import { PrismaHealthIndicator } from './prisma.health';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [TerminusModule, PrismaModule],
   controllers: [HealthController],
-  providers: [HealthCheckService, PrismaHealthIndicator],
+  providers: [PrismaHealthIndicator],
 })
 export class HealthModule {}
-export { PrismaHealthIndicator };

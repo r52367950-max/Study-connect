@@ -10,6 +10,7 @@ import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
 import { RATE_LIMIT_RULES_KEY, RateLimitRule } from './rate-limit.decorator';
 import { RateLimitService } from './rate-limit.service';
+import { normalizePhone } from './util';
 
 const DEFAULT_GLOBAL_LIMIT = 120;
 const DEFAULT_GLOBAL_WINDOW_MS = 60_000;
@@ -59,7 +60,9 @@ export class RateLimitGuard implements CanActivate {
     if (method === 'POST' && request.path === '/auth/login') {
       const identity = this.extractIdentifier(request);
       if (identity) {
-        const lock = this.rateLimitService.checkLoginLock(`login-id:${identity}`);
+        const lock = this.rateLimitService.checkLoginLock(
+          this.rateLimitService.buildLoginLockKey(identity, ip),
+        );
         if (lock.locked) {
           throw new HttpException(
             `Too many login failures, retry in ${Math.ceil(lock.retryAfterMs / 1000)}s`,
@@ -112,9 +115,12 @@ export class RateLimitGuard implements CanActivate {
   }
 
   private extractIp(request: Request): string {
-    // Only honor X-Forwarded-For when Express thinks we're behind a trusted proxy.
+    // Only honor X-Forwarded-For when a positive proxy-hop count was configured
+    // (main.ts only sets 'trust proxy' to a number when TRUST_PROXY is enabled).
+    // An explicit numeric check avoids Boolean()-coercing a stray string to true.
     const app = request.app as { get?: (key: string) => unknown } | undefined;
-    const trustProxyEnabled = Boolean(app?.get?.('trust proxy'));
+    const proxySetting = app?.get?.('trust proxy');
+    const trustProxyEnabled = typeof proxySetting === 'number' && proxySetting > 0;
     if (trustProxyEnabled) {
       return request.ip || request.socket.remoteAddress || 'unknown';
     }
@@ -129,8 +135,11 @@ export class RateLimitGuard implements CanActivate {
     if (typeof body.email === 'string' && body.email.trim().length > 0) {
       return body.email.trim().toLowerCase();
     }
+    // Normalize the phone exactly as auth.service does (strip spaces/dashes,
+    // lowercase) so per-identity counters and the login lock land on the same
+    // key regardless of how the caller formatted the number.
     if (typeof body.phone === 'string' && body.phone.trim().length > 0) {
-      return body.phone.trim();
+      return normalizePhone(body.phone).toLowerCase();
     }
     return null;
   }

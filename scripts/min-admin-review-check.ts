@@ -192,8 +192,24 @@ class MinioServiceMock {
   }
 }
 
+function readCookiePair(setCookieHeader: string | null, cookieName: string): string {
+  if (!setCookieHeader) return '';
+  const segment = setCookieHeader
+    .split(',')
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(`${cookieName}=`));
+  return segment ? (segment.split(';')[0] ?? '') : '';
+}
+
 async function run(): Promise<void> {
   process.env.JWT_SECRET = 'task4-secret';
+  // Match the other 8 min-* scripts: bypass real OTP verification so register/
+  // login succeed against the mock Prisma (which has no otpAttempt table).
+  process.env.AUTH_OTP_TEST_BYPASS = process.env.AUTH_OTP_TEST_BYPASS ?? 'true';
+  // State-changing routes go through CsrfGuard, which requires an allow-listed
+  // Origin + a matching CSRF cookie/header. Set the allow-list and send those on
+  // every POST below (this test predates CSRF enforcement).
+  process.env.CORS_ORIGIN = 'http://frontend.local:3000';
   process.env.MAX_UPLOAD_SIZE_MB = '50';
 
   const prismaMock = new PrismaServiceMock();
@@ -215,45 +231,74 @@ async function run(): Promise<void> {
   const address = app.getHttpServer().address();
   const port = typeof address === 'string' ? 3000 : address.port;
   const base = `http://127.0.0.1:${port}`;
+  const ORIGIN = 'http://frontend.local:3000';
+
+  async function issueCsrfCookie(existingCookies = ''): Promise<{ token: string; cookiePair: string }> {
+    const res = await fetch(`${base}/auth/csrf`, {
+      headers: { origin: ORIGIN, ...(existingCookies ? { cookie: existingCookies } : {}) },
+    });
+    const body = (await res.json()) as { csrfToken: string };
+    return { token: body.csrfToken, cookiePair: readCookiePair(res.headers.get('set-cookie'), 'csrf-token') };
+  }
+
+  async function registerUser(input: { email: string; username: string; password: string }): Promise<void> {
+    const csrf = await issueCsrfCookie();
+    const res = await fetch(`${base}/auth/register`, {
+      method: 'POST',
+      headers: {
+        origin: ORIGIN,
+        'content-type': 'application/json',
+        cookie: csrf.cookiePair,
+        'x-csrf-token': csrf.token,
+      },
+      body: JSON.stringify({ ...input, otpCode: '000000' }),
+    });
+    if (res.status !== 201) {
+      throw new Error(`register ${input.email} failed, status=${res.status}, body=${await res.text()}`);
+    }
+  }
+
+  async function loginUser(email: string, password: string): Promise<string> {
+    const csrf = await issueCsrfCookie();
+    const res = await fetch(`${base}/auth/login`, {
+      method: 'POST',
+      headers: {
+        origin: ORIGIN,
+        'content-type': 'application/json',
+        cookie: csrf.cookiePair,
+        'x-csrf-token': csrf.token,
+      },
+      body: JSON.stringify({ email, password }),
+    });
+    if (res.status !== 200) {
+      throw new Error(`login ${email} failed, status=${res.status}, body=${await res.text()}`);
+    }
+    return ((await res.json()) as { accessToken: string }).accessToken;
+  }
 
   // register user + admin
-  await fetch(`${base}/auth/register`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: 'user@example.com', username: 'user1', password: 'StrongPass123!', otpCode: '000000' }),
-  });
-  await fetch(`${base}/auth/register`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: 'admin@example.com', username: 'admin1', password: 'StrongPass123!', otpCode: '000000' }),
-  });
+  await registerUser({ email: 'user@example.com', username: 'user1', password: 'StrongPass123!' });
+  await registerUser({ email: 'admin@example.com', username: 'admin1', password: 'StrongPass123!' });
 
   prismaMock.setUserRole('admin@example.com', 'ADMIN');
 
-  const userLogin = await fetch(`${base}/auth/login`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: 'user@example.com', password: 'StrongPass123!' }),
-  });
-  const userToken = ((await userLogin.json()) as { accessToken: string }).accessToken;
-
-  const adminLogin = await fetch(`${base}/auth/login`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: 'admin@example.com', password: 'StrongPass123!' }),
-  });
-  const adminToken = ((await adminLogin.json()) as { accessToken: string }).accessToken;
+  const userToken = await loginUser('user@example.com', 'StrongPass123!');
+  const adminToken = await loginUser('admin@example.com', 'StrongPass123!');
 
   const forbiddenRes = await fetch(`${base}/admin/materials/pending?page=1&pageSize=10`, {
     headers: { authorization: `Bearer ${userToken}` },
   });
   console.log('user pending list status:', forbiddenRes.status);
-  if (forbiddenRes.status !== 401) {
+  // An authenticated USER hitting an ADMIN route is a role failure -> 403
+  // (per docs/error-code-spec.md). The previous 401 only "passed" because the
+  // OTP-less register failed and the token was undefined.
+  if (forbiddenRes.status !== 403) {
     process.exitCode = 1;
-    throw new Error(`expected user pending list status 401, got ${forbiddenRes.status}`);
+    throw new Error(`expected user pending list status 403, got ${forbiddenRes.status}`);
   }
 
   async function uploadOne(title: string): Promise<string> {
+    const csrf = await issueCsrfCookie(`auth-token=${userToken}`);
     const form = new FormData();
     form.set('title', title);
     form.set('description', `${title} description`);
@@ -262,11 +307,35 @@ async function run(): Promise<void> {
 
     const res = await fetch(`${base}/materials`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${userToken}` },
+      headers: {
+        origin: ORIGIN,
+        authorization: `Bearer ${userToken}`,
+        cookie: csrf.cookiePair,
+        'x-csrf-token': csrf.token,
+      },
       body: form,
     });
+    if (res.status !== 201) {
+      throw new Error(`upload ${title} failed, status=${res.status}, body=${await res.text()}`);
+    }
     const body = (await res.json()) as { id: string };
     return body.id;
+  }
+
+  // POST admin actions go through CsrfGuard too — issue a token per call.
+  async function adminPost(path: string, payload?: Record<string, unknown>): Promise<Response> {
+    const csrf = await issueCsrfCookie(`auth-token=${adminToken}`);
+    return fetch(`${base}${path}`, {
+      method: 'POST',
+      headers: {
+        origin: ORIGIN,
+        authorization: `Bearer ${adminToken}`,
+        cookie: csrf.cookiePair,
+        'x-csrf-token': csrf.token,
+        ...(payload ? { 'content-type': 'application/json' } : {}),
+      },
+      ...(payload ? { body: JSON.stringify(payload) } : {}),
+    });
   }
 
   const materialApproveId = await uploadOne('to-approve');
@@ -283,49 +352,33 @@ async function run(): Promise<void> {
     throw new Error(`expected admin pending list status 200, got ${pendingRes.status}`);
   }
 
-  const approveRes = await fetch(`${base}/admin/materials/${materialApproveId}/approve`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${adminToken}` },
-  });
+  // These admin actions are @Post with no @HttpCode, so Nest returns 201.
+  const approveRes = await adminPost(`/admin/materials/${materialApproveId}/approve`);
   const approveText = await approveRes.text();
   console.log('approve status:', approveRes.status);
   console.log('approve body:', approveText);
-  if (approveRes.status !== 200) {
+  if (approveRes.status !== 201) {
     process.exitCode = 1;
-    throw new Error(`expected approve status 200, got ${approveRes.status}`);
+    throw new Error(`expected approve status 201, got ${approveRes.status}`);
   }
 
-  const rejectRes = await fetch(`${base}/admin/materials/${materialRejectId}/reject`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${adminToken}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ reason: 'Spam content' }),
-  });
+  const rejectRes = await adminPost(`/admin/materials/${materialRejectId}/reject`, { reason: 'Spam content' });
   const rejectText = await rejectRes.text();
   console.log('reject status:', rejectRes.status);
   console.log('reject body:', rejectText);
-  if (rejectRes.status !== 200) {
+  if (rejectRes.status !== 201) {
     process.exitCode = 1;
-    throw new Error(`expected reject status 200, got ${rejectRes.status}`);
+    throw new Error(`expected reject status 201, got ${rejectRes.status}`);
   }
 
 
-  const offlineRes = await fetch(`${base}/admin/materials/${materialApproveId}/offline`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${adminToken}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ reviewComment: 'Taken down by admin' }),
-  });
+  const offlineRes = await adminPost(`/admin/materials/${materialApproveId}/offline`, { reviewComment: 'Taken down by admin' });
   const offlineText = await offlineRes.text();
   console.log('offline status:', offlineRes.status);
   console.log('offline body:', offlineText);
-  if (offlineRes.status !== 200) {
+  if (offlineRes.status !== 201) {
     process.exitCode = 1;
-    throw new Error(`expected offline status 200, got ${offlineRes.status}`);
+    throw new Error(`expected offline status 201, got ${offlineRes.status}`);
   }
 
   console.log('db offlined material:', JSON.stringify(prismaMock.debugMaterialById(materialApproveId)));

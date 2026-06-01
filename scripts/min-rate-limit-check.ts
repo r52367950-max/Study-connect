@@ -301,17 +301,17 @@ async function run(): Promise<void> {
   await app.listen(0);
 
   const rateLimitService = app.get(RateLimitService) as RateLimitService & {
-    logger?: { warn: (message: string) => void; log: (message: string) => void };
+    logger?: { warn: (message: unknown) => void; log: (message: unknown) => void };
   };
   const capturedLogs: RateLimitLogEvent[] = [];
   rateLimitService.logger = {
-    warn(message: string) {
+    warn(message: unknown) {
       const parsed = parseRateLimitLog(message);
       if (parsed) {
         capturedLogs.push(parsed);
       }
     },
-    log(message: string) {
+    log(message: unknown) {
       const parsed = parseRateLimitLog(message);
       if (parsed) {
         capturedLogs.push(parsed);
@@ -492,16 +492,27 @@ async function run(): Promise<void> {
   await app.close();
 }
 
-function parseRateLimitLog(message: string): RateLimitLogEvent | null {
-  try {
-    const parsed = JSON.parse(message) as RateLimitLogEvent;
-    if (parsed.event === 'rate_limit_blocked' || parsed.event === 'rate_limit_metric') {
-      return parsed;
+function parseRateLimitLog(message: unknown): RateLimitLogEvent | null {
+  // RateLimitService.recordLimitHit logs a STRUCTURED OBJECT (not a JSON
+  // string), so the assertion must accept objects directly; we still JSON-parse
+  // plain strings for forward/backward compatibility. Without this, the
+  // in-memory evidence capture was silently empty and the 429 log assertions
+  // could never pass.
+  let value: unknown = message;
+  if (typeof message === 'string') {
+    try {
+      value = JSON.parse(message);
+    } catch {
+      return null;
     }
-    return null;
-  } catch {
-    return null;
   }
+  if (value && typeof value === 'object') {
+    const event = (value as RateLimitLogEvent).event;
+    if (event === 'rate_limit_blocked' || event === 'rate_limit_metric') {
+      return value as RateLimitLogEvent;
+    }
+  }
+  return null;
 }
 
 function assertBlockedLog(

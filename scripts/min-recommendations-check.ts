@@ -55,7 +55,13 @@ function buildPrismaStub(opts: {
   materials: StubMaterial[];
   ratings?: { materialId: string; avg: number; count: number }[];
   colleagueMaterials?: string[];
+  viewEventCount?: number;
+  schoolUserCount?: number;
 }) {
+  // viewEventCount default sits above VIEW_EVENT_PHASE2_MIN (20) and
+  // schoolUserCount above SCHOOL_DENSITY_MIN (10), so phase-2/3 paths can
+  // be reached when the user profile requests them; phase selection still
+  // hinges on collaborativeOptIn + schoolId in the user profile.
   return {
     material: {
       findMany: async () => opts.materials,
@@ -67,6 +73,13 @@ function buildPrismaStub(opts: {
           _avg: { score: r.avg },
           _count: { score: r.count },
         })),
+    },
+    viewEvent: {
+      count: async () => opts.viewEventCount ?? 25,
+      groupBy: async () => [],
+    },
+    user: {
+      count: async () => opts.schoolUserCount ?? 15,
     },
     $queryRaw: async () =>
       (opts.colleagueMaterials ?? []).map((id) => ({ materialId: id })),
@@ -100,6 +113,7 @@ async function testProfileMatchBeatsPopularity() {
   );
   const items = await service.recommend({
     id: 'u1',
+    onboardedAt: new Date(),
     subjects: ['数学'],
     grades: ['高一'],
     stages: ['高中'],
@@ -122,6 +136,7 @@ async function testStageFallback() {
   );
   const items = await service.recommend({
     id: 'u1',
+    onboardedAt: new Date(),
     subjects: ['数学'],
     grades: [],
     stages: ['高中'],
@@ -148,7 +163,8 @@ async function testCollaborativeKAnonymity() {
   );
   const optedOutItems = await optedOut.recommend({
     id: 'u1',
-    subjects: [],
+    onboardedAt: new Date(),
+    subjects: ['历史'],
     grades: [],
     stages: [],
     city: null,
@@ -173,7 +189,8 @@ async function testCollaborativeKAnonymity() {
   );
   const optedInItems = await optedIn.recommend({
     id: 'u1',
-    subjects: [],
+    onboardedAt: new Date(),
+    subjects: ['历史'],
     grades: [],
     stages: [],
     city: null,

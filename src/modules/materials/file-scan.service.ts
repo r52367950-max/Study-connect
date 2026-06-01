@@ -43,7 +43,7 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     const jobs = await this.prisma.fileScanJob.findMany({
-      where: { status: FileScanJobStatus.PENDING },
+      where: { status: FileScanJobStatus.PENDING, scheduledAt: { lte: new Date() } },
       orderBy: { scheduledAt: 'asc' },
       take: 5,
     });
@@ -66,20 +66,33 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
         await this.prisma.fileScanJob.update({ where: { id: job.id }, data: { status: FileScanJobStatus.DONE, lastError: null } });
       } catch (error) {
         const attempts = job.attempts + 1;
-        const timeout = error instanceof Error && error.message === 'SCAN_TIMEOUT';
-        const failedStatus: UploadSecurityStatus = timeout ? FileSafetyStatus.TIMEOUT : FileSafetyStatus.FAILED;
-        const terminal = attempts >= MAX_ATTEMPTS;
-        await this.updateScanStatus(job.materialId, terminal ? FileSafetyStatus.TIMEOUT : failedStatus);
+        const message = error instanceof Error ? error.message : String(error);
+        // An illegal-file rejection is deterministic — retrying can't change the
+        // verdict, so fail terminally as FAILED (correct: it stays 404). Timeouts
+        // and object-store fetch errors are transient and get a bounded retry.
+        const transient = message === 'SCAN_TIMEOUT' || message.startsWith('MINIO_FETCH_FAILED');
+        const terminal = !transient || attempts >= MAX_ATTEMPTS;
+
+        let materialStatus: UploadSecurityStatus;
+        if (!transient) {
+          materialStatus = FileSafetyStatus.FAILED;
+        } else if (terminal) {
+          materialStatus = FileSafetyStatus.TIMEOUT;
+        } else {
+          materialStatus = FileSafetyStatus.SCANNING;
+        }
+        await this.updateScanStatus(job.materialId, materialStatus);
+
         await this.prisma.fileScanJob.update({
           where: { id: job.id },
           data: {
             attempts,
             status: terminal ? FileScanJobStatus.FAILED : FileScanJobStatus.PENDING,
-            lastError: error instanceof Error ? error.message : String(error),
-            scheduledAt: new Date(),
+            lastError: message,
+            scheduledAt: new Date(Date.now() + (terminal ? 0 : this.retryBackoffMs(attempts))),
           },
         });
-        this.logger.warn({ event: 'FILE_SCAN_FAILED', materialId: job.materialId, error: error instanceof Error ? error.message : String(error) });
+        this.logger.warn({ event: 'FILE_SCAN_FAILED', materialId: job.materialId, attempts, terminal, error: message });
       }
     }
   }
@@ -102,7 +115,22 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
 
   private async executeWithTimeout<T>(task: () => Promise<T> | T): Promise<T> {
     const timeoutMs = this.getScanTimeoutMs();
-    return await Promise.race([Promise.resolve().then(task), new Promise<T>((_, r) => setTimeout(() => r(new Error('SCAN_TIMEOUT')), timeoutMs))]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        Promise.resolve().then(task),
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('SCAN_TIMEOUT')), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  private retryBackoffMs(attempts: number): number {
+    // Exponential backoff between scan retries, capped at 5 minutes.
+    return Math.min(DEFAULT_SCAN_INTERVAL_MS * 2 ** Math.max(attempts - 1, 0), 5 * 60_000);
   }
 
   private async updateScanStatus(materialId: string, status: UploadSecurityStatus): Promise<void> {
