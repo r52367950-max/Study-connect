@@ -32,7 +32,12 @@ function runOriginCheck(
 }
 
 async function run(): Promise<void> {
-  const allowedOrigins = parseAllowedCorsOrigins('https://app.example.com:443,http://localhost:3000');
+  // assertCorsConfigInProduction now requires AUTH_COOKIE_SECURE=true and
+  // https-only origins (see src/common/security/cors-config.ts). Reflect that
+  // here so the strict-config check runs the path it claims to.
+  process.env.AUTH_COOKIE_SECURE = 'true';
+
+  const allowedOrigins = parseAllowedCorsOrigins('https://app.example.com:443,https://localhost.example.com:3000');
 
   assertCorsConfigInProduction(allowedOrigins, true);
 

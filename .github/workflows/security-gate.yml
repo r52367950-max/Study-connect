@@ -41,6 +41,7 @@ jobs:
 
       - name: Run min-all checks
         run: |
+          set -o pipefail
           mkdir -p artifacts
           npm run test:min-all | tee artifacts/min-all.log
 

@@ -11,6 +11,7 @@ import {
   parseAllowedCorsOrigins,
 } from './common/security/cors-config';
 import { assertSecretStrength } from './common/security/secret-strength';
+import { parseTrustProxy } from './common/security/trust-proxy';
 
 if (process.env.SENTRY_DSN) {
   Sentry.init({
@@ -33,12 +34,14 @@ async function bootstrap() {
   app.useLogger(app.get(Logger));
   const isProduction = process.env.NODE_ENV === 'production';
 
-  const trustProxy = process.env.TRUST_PROXY;
-  if (trustProxy) {
-    const proxyValue = Number(trustProxy);
+  // Explicitly parse TRUST_PROXY (throws on invalid values) and only enable the
+  // proxy-trust hop count when a positive integer is configured. Never pass a
+  // raw non-numeric string to Express, where it would be coerced to "trust all".
+  const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
+  if (trustProxy.enabled) {
     (app as unknown as { set: (key: string, value: unknown) => void }).set(
       'trust proxy',
-      Number.isFinite(proxyValue) && proxyValue > 0 ? proxyValue : trustProxy,
+      trustProxy.hops,
     );
   }
 

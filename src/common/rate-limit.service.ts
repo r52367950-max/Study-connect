@@ -80,7 +80,7 @@ export class RateLimitService {
     lockMs: number;
   }): void {
     const now = Date.now();
-    for (const key of this.buildLoginLockKeys(input.identifier)) {
+    for (const key of this.buildLoginLockKeys(input.identifier, input.ip)) {
       const state = this.loginLocks.get(key);
       if (!state || now - state.firstFailureAt > input.failureWindowMs) {
         this.loginLocks.set(key, {
@@ -107,14 +107,23 @@ export class RateLimitService {
     }
   }
 
-  recordLoginSuccess(identifier: string): void {
-    for (const key of this.buildLoginLockKeys(identifier)) {
+  recordLoginSuccess(identifier: string, ip: string): void {
+    for (const key of this.buildLoginLockKeys(identifier, ip)) {
       this.loginLocks.delete(key);
     }
   }
 
-  private buildLoginLockKeys(identifier: string): string[] {
-    return [`login-id:${identifier.toLowerCase()}`];
+  /**
+   * Login-lock key. Scoped by identifier AND client IP so a third party cannot
+   * lock a victim's account from arbitrary IPs (remote-lockout DoS); a brute
+   * forcer still gets their own (identifier, ip) pair locked after N failures.
+   */
+  buildLoginLockKey(identifier: string, ip: string): string {
+    return `login-id:${identifier.toLowerCase()}:${ip}`;
+  }
+
+  private buildLoginLockKeys(identifier: string, ip: string): string[] {
+    return [this.buildLoginLockKey(identifier, ip)];
   }
 
   private recordLimitHit(input: {

@@ -22,7 +22,7 @@
 | `POST /auth/register` | `auth-register` | 12 / 60s | 限制注册刷接口 |
 | `POST /auth/login` | `auth-login-ip` | 25 / 60s | 登录 IP 速率上限 |
 | `POST /auth/login` | `auth-login-ip-email` | 20 / 60s（默认） | 登录 IP+邮箱组合限流（可 env 覆盖） |
-| `POST /auth/login` | `auth-login-lock` | 5 次失败后锁定 5 分钟（默认） | 登录失败熔断锁 |
+| `POST /auth/login` | `auth-login-lock` | 5 次失败后锁定 5 分钟（默认） | 登录失败熔断锁，按 **标识 + 客户端 IP** 维度（见下方说明） |
 | `POST /auth/logout` | `auth-logout` | 40 / 60s | 限制登出洪泛 |
 | `POST /auth/change-password` | `auth-change-password` | 5 / 60s | 限制高成本密码校验被持续打满 |
 | `POST /materials` | `materials-upload` | 10 / 60s | 上传接口保护 |
@@ -37,6 +37,17 @@
 - `RATE_LIMIT_LOGIN_MAX_FAILURES`（默认 5）
 - `RATE_LIMIT_LOGIN_FAILURE_WINDOW_MS`（默认 60_000）
 - `RATE_LIMIT_LOGIN_LOCK_MS`（默认 300_000）
+
+### 登录失败锁的键维度（安全设计取舍）
+
+失败熔断锁（`auth-login-lock`）的键为 **`login-id:<标识>:<客户端 IP>`**（标识 = 归一化后的邮箱/手机号）。
+
+- **动机**：早期实现只按标识（`login-id:<标识>`）锁定，任意 IP 连续 5 次错误凭据即可把某个**已知账号**锁死 5 分钟，可被循环利用做远程拒绝服务（锁死任意账号）。
+- **现状**：锁改为「标识 + IP」联合维度后：
+  - 单一攻击 IP 针对某账号连续失败仍会在 5 次后被锁（按 IP 维度保留暴力破解保护，强度不变）；
+  - 受害者从自己的 IP 登录不再被第三方 IP 的失败连累（消除远程锁死 DoS）。
+- **取舍**：不再存在「跨 IP 的全账号锁」。分布式撞库改由按 IP 的计数规则（`auth-login-ip` 25/60s、`auth-login-ip-email` 20/60s）与全局限流共同约束——这与 OWASP「优先账号+IP 锁、避免纯账号锁」的建议一致。
+- **键对齐**：`RateLimitGuard` 的前置检查与 `AuthService.login` 均通过 `RateLimitService.buildLoginLockKey(identifier, ip)` 生成同一把键；手机号在两侧都先经 `normalizePhone` 归一化，避免格式变体绕过。
 
 ## 429 命中验证（脚本）
 

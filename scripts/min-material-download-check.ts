@@ -1,5 +1,5 @@
-import { FileSafetyStatus } from '@prisma/client';
 /// <reference path="../src/types/express.d.ts" />
+import { FileSafetyStatus } from '@prisma/client';
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { AppModule } from '../src/app.module';

@@ -539,6 +539,11 @@ export class MaterialsService {
     return {
       status: MaterialStatus.APPROVED,
       visibility: MaterialVisibility.PUBLIC,
+      // Only surface materials whose file passed the async scan (or predates it,
+      // i.e. null), matching the keyword raw-SQL branch and the detail/download
+      // guard. Without this, APPROVED-but-QUARANTINED/SCANNING/FAILED/TIMEOUT
+      // rows leak into list/RATING results and then 404 on click/download.
+      AND: [{ OR: [{ fileSafetyStatus: FileSafetyStatus.PASSED }, { fileSafetyStatus: null }] }],
       ...(query.q
         ? {
             OR: [

@@ -12,6 +12,7 @@ const checks = [
   'test:min-material-rating',
   'test:min-csrf-regression',
   'test:min-rate-limit',
+  'test:min-rate-limit-identity',
   'test:min-recommendations',
   'test:min-recommend-tiering',
   'test:min-admin-update-review-errors',

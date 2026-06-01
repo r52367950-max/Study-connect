@@ -120,7 +120,9 @@ export class AuthService {
     const identifier = dto.email
       ? dto.email.toLowerCase()
       : normalizePhone(dto.phone!);
-    const lock = this.rateLimitService.checkLoginLock(`login-id:${identifier}`);
+    const lock = this.rateLimitService.checkLoginLock(
+      this.rateLimitService.buildLoginLockKey(identifier, ipAddress),
+    );
     if (lock.locked) {
       throw new HttpException(
         `Too many login failures, retry in ${Math.ceil(lock.retryAfterMs / 1000)}s`,
@@ -167,7 +169,7 @@ export class AuthService {
       }
     }
 
-    this.rateLimitService.recordLoginSuccess(identifier);
+    this.rateLimitService.recordLoginSuccess(identifier, ipAddress);
 
     const profile: AuthUser = {
       id: user.id,
