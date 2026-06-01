@@ -8,6 +8,7 @@
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "lint": "tsc --noEmit -p tsconfig.json",
+    "lint:scripts": "tsc --noEmit -p tsconfig.scripts.json",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "test:min-auth": "ts-node scripts/min-auth-check.ts",

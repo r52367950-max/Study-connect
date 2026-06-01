@@ -45,10 +45,6 @@ function LoginPageContent() {
   const { isLoggedIn, setAuth } = useAuth()
   const redirect = safeRedirect(searchParams.get('redirect'))
 
-  useEffect(() => {
-    if (isLoggedIn) router.replace(redirect)
-  }, [isLoggedIn, redirect, router])
-
   const [idKind, setIdKind] = useState<IdentifierKind>('email')
   const [mode, setMode] = useState<CredentialMode>('password')
   const [identifier, setIdentifier] = useState('')
@@ -96,6 +92,16 @@ function LoginPageContent() {
     },
   })
 
+  // "Already logged in" → bounce to the requested redirect. Skip when a login
+  // attempt is in flight or just succeeded, otherwise this effect races with
+  // loginMutation.onSuccess and can stomp the /onboarding redirect that
+  // first-time users need.
+  useEffect(() => {
+    if (!isLoggedIn) return
+    if (loginMutation.isPending || loginMutation.isSuccess) return
+    router.replace(redirect)
+  }, [isLoggedIn, redirect, router, loginMutation.isPending, loginMutation.isSuccess])
+
   const handleSendOtp = () => {
     if (!identifierValid) {
       setFormError(idKind === 'email' ? '请输入有效的邮箱地址' : '请输入有效的手机号')
@@ -134,6 +140,9 @@ function LoginPageContent() {
     setFormError(null)
     setOtpNotice(null)
     countdown.reset()
+    // Drop any in-flight OTP request so a late onSuccess from the previous tab
+    // can't show "已发送" on the new tab (where the code wasn't actually sent).
+    sendOtpMutation.reset()
   }
 
   return (

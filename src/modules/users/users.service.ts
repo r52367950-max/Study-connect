@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../infra';
 import { GRADES, STAGES, SUBJECTS, UpdateProfileDto, VIEWED_KINDS } from './dto/update-profile.dto';
@@ -44,7 +44,7 @@ export class UsersService {
       if (dto.schoolId) {
         const school = await this.prisma.school.findUnique({ where: { id: dto.schoolId } });
         if (!school) {
-          throw new BadRequestException('Unknown school id');
+          throw new UnprocessableEntityException('Unknown school id');
         }
         data.school = { connect: { id: school.id } };
         data.schoolNameFreeText = null;
@@ -92,7 +92,8 @@ export class UsersService {
       if (!values) return;
       const bad = values.filter((v) => !allowed.includes(v));
       if (bad.length > 0) {
-        throw new BadRequestException(`Invalid ${label}: ${bad.join(', ')}`);
+        // Per docs/error-code-spec.md, parameter validation failures are 422.
+        throw new UnprocessableEntityException(`Invalid ${label}: ${bad.join(', ')}`);
       }
     };
     checkAll('stage', dto.stages, STAGES);

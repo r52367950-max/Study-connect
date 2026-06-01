@@ -103,6 +103,9 @@ export default function RegisterPage() {
     setFormError(null)
     setOtpNotice(null)
     countdown.reset()
+    // Drop any in-flight OTP request so a late onSuccess from the previous tab
+    // can't show "已发送" on the new tab (where the code wasn't actually sent).
+    sendOtpMutation.reset()
   }
 
   return (

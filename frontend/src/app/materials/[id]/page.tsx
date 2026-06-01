@@ -38,7 +38,12 @@ export default function MaterialDetailPage() {
   // Dwell tracking: accumulate time on this page, report it once on leave
   // (tab hidden / pagehide / client-side navigation away). Logged-in only.
   const dwellKindRef = useRef<MaterialKind | null | undefined>(undefined)
-  dwellKindRef.current = material?.kind
+  // Update the ref in an effect (not the render body) so concurrent/strict
+  // mode can't observe a mid-render mutation, and the dependency captures
+  // late-arriving query data the dwell ping will read on unmount.
+  useEffect(() => {
+    dwellKindRef.current = material?.kind
+  }, [material?.kind])
 
   useEffect(() => {
     if (!isLoggedIn || !id) return
