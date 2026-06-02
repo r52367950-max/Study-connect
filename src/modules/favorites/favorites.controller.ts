@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
+import { Controller, Delete, Get, HttpStatus, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { Request } from 'express';
@@ -23,14 +23,22 @@ export class FavoritesController {
   @Post(':materialId')
   @RateLimit({ name: 'favorites-add', limit: 60, windowMs: 60_000 })
   @ApiOperation({ summary: 'Favorite one material' })
-  add(@Req() req: Request, @Param('materialId', new ParseUUIDPipe()) materialId: string) {
+  add(
+    @Req() req: Request,
+    // B9: invalid UUIDs return 404 (hidden resource semantics, not 400 validation error)
+    @Param('materialId', new ParseUUIDPipe({ errorHttpStatusCode: HttpStatus.NOT_FOUND })) materialId: string,
+  ) {
     return this.favoritesService.add(req.user.id, materialId);
   }
 
   @Delete(':materialId')
   @RateLimit({ name: 'favorites-remove', limit: 60, windowMs: 60_000 })
   @ApiOperation({ summary: 'Remove one favorite' })
-  remove(@Req() req: Request, @Param('materialId', new ParseUUIDPipe()) materialId: string) {
+  remove(
+    @Req() req: Request,
+    // B9: invalid UUIDs return 404 (hidden resource semantics, not 400 validation error)
+    @Param('materialId', new ParseUUIDPipe({ errorHttpStatusCode: HttpStatus.NOT_FOUND })) materialId: string,
+  ) {
     return this.favoritesService.remove(req.user.id, materialId);
   }
 }

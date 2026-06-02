@@ -78,6 +78,7 @@ export class RateLimitService {
     failureWindowMs: number;
     maxFailures: number;
     lockMs: number;
+    ipOnlyMaxFailures?: number;
   }): void {
     const now = Date.now();
     for (const key of this.buildLoginLockKeys(input.identifier, input.ip)) {
@@ -105,12 +106,42 @@ export class RateLimitService {
         });
       }
     }
+
+    // B3: pure-IP failure counter to catch credential-stuffing with rotating identifiers.
+    // Threshold N = ipOnlyMaxFailures (default 10); same window/lock timing as per-identity lock.
+    const ipMaxFailures = input.ipOnlyMaxFailures ?? 10;
+    const ipKey = this.buildLoginIpOnlyKey(input.ip);
+    const ipState = this.loginLocks.get(ipKey);
+    if (!ipState || now - ipState.firstFailureAt > input.failureWindowMs) {
+      this.loginLocks.set(ipKey, { failures: 1, firstFailureAt: now, lockUntil: 0 });
+    } else {
+      ipState.failures += 1;
+      if (ipState.failures >= ipMaxFailures) {
+        ipState.lockUntil = now + input.lockMs;
+        this.recordLimitHit({
+          metricKey: 'rate_limit.rule.auth-login-ip-fail',
+          rule: 'auth-login-ip-fail',
+          key: ipKey,
+          route: '/auth/login',
+          method: 'POST',
+          ip: input.ip,
+          retryAfterMs: input.lockMs,
+        });
+      }
+    }
   }
 
   recordLoginSuccess(identifier: string, ip: string): void {
     for (const key of this.buildLoginLockKeys(identifier, ip)) {
       this.loginLocks.delete(key);
     }
+    // On successful login reset the IP-only failure counter so legitimate shared-NAT
+    // users are not penalised for a previous attacker attempt from the same IP.
+    this.loginLocks.delete(this.buildLoginIpOnlyKey(ip));
+  }
+
+  checkLoginIpOnlyLock(ip: string): { locked: boolean; retryAfterMs: number } {
+    return this.checkLoginLock(this.buildLoginIpOnlyKey(ip));
   }
 
   /**
@@ -120,6 +151,11 @@ export class RateLimitService {
    */
   buildLoginLockKey(identifier: string, ip: string): string {
     return `login-id:${identifier.toLowerCase()}:${ip}`;
+  }
+
+  /** Pure-IP failure key used to detect credential stuffing with rotating identifiers (B3). */
+  buildLoginIpOnlyKey(ip: string): string {
+    return `login-ip-only:${ip}`;
   }
 
   private buildLoginLockKeys(identifier: string, ip: string): string[] {

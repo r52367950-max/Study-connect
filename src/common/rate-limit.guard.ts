@@ -58,6 +58,15 @@ export class RateLimitGuard implements CanActivate {
     }
 
     if (method === 'POST' && request.path === '/auth/login') {
+      // B3: check pure-IP failure lock first (catches credential stuffing with rotating identifiers)
+      const ipOnlyLock = this.rateLimitService.checkLoginIpOnlyLock(ip);
+      if (ipOnlyLock.locked) {
+        throw new HttpException(
+          `Too many login failures from this IP, retry in ${Math.ceil(ipOnlyLock.retryAfterMs / 1000)}s`,
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+
       const identity = this.extractIdentifier(request);
       if (identity) {
         const lock = this.rateLimitService.checkLoginLock(

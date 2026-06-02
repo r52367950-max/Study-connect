@@ -112,6 +112,7 @@ export class MaterialsService {
         stage: string | null;
         grade: string | null;
         subject: string | null;
+        kind: string | null;
         year: number | null;
         region: string | null;
         visibility: MaterialVisibility;
@@ -120,7 +121,7 @@ export class MaterialsService {
         totalCount: bigint;
       }>>(Prisma.sql`
         SELECT
-          m.id, m.title, m.description, m.stage, m.grade, m.subject, m.year, m.region,
+          m.id, m.title, m.description, m.stage, m.grade, m.subject, m.kind, m.year, m.region,
           m.visibility, m.created_at AS "createdAt",
           COUNT(d.id)::bigint AS "downloadCount",
           COUNT(*) OVER()::bigint AS "totalCount"
@@ -156,6 +157,7 @@ export class MaterialsService {
           stage: item.stage,
           grade: item.grade,
           subject: item.subject,
+          kind: item.kind,
           year: item.year,
           region: item.region,
           visibility: item.visibility,
@@ -167,81 +169,67 @@ export class MaterialsService {
     }
 
     if (sort === MaterialSort.RATING) {
-      const allItems = await this.prisma.material.findMany({
-        where,
-        orderBy: [{ createdAt: 'desc' }],
-        select: {
-          id: true,
-          title: true,
-          description: true,
-          stage: true,
-          grade: true,
-          subject: true,
-          year: true,
-          region: true,
-          visibility: true,
-          createdAt: true,
-          _count: {
-            select: {
-              downloads: true,
-            },
-          },
-        },
-      });
+      // B1 fix: use raw SQL with LEFT JOIN aggregation + LIMIT/OFFSET to avoid full-table load into memory
+      const ratingRows = await this.prisma.$queryRaw<Array<{
+        id: string;
+        title: string;
+        description: string | null;
+        stage: string | null;
+        grade: string | null;
+        subject: string | null;
+        kind: string | null;
+        year: number | null;
+        region: string | null;
+        visibility: MaterialVisibility;
+        createdAt: Date;
+        avg_score: number | null;
+        rating_count: bigint;
+        download_count: bigint;
+        total_count: bigint;
+      }>>(Prisma.sql`
+        SELECT
+          m.id, m.title, m.description, m.stage, m.grade, m.subject, m.kind, m.year, m.region,
+          m.visibility, m.created_at AS "createdAt",
+          AVG(r.score) AS avg_score,
+          COUNT(DISTINCT r.id)::bigint AS rating_count,
+          COUNT(DISTINCT d.id)::bigint AS download_count,
+          COUNT(*) OVER()::bigint AS total_count
+        FROM materials m
+        LEFT JOIN ratings r ON r.material_id = m.id
+        LEFT JOIN downloads d ON d.material_id = m.id
+        WHERE m.status = 'APPROVED'
+          AND m.visibility = 'PUBLIC'
+          AND (m.file_safety_status = 'PASSED' OR m.file_safety_status IS NULL)
+          AND (${query.subject ?? null}::text IS NULL OR m.subject = ${query.subject})
+          AND (${query.stage ?? null}::text IS NULL OR m.stage = ${query.stage})
+          AND (${query.grade ?? null}::text IS NULL OR m.grade = ${query.grade})
+          AND (${query.region ?? null}::text IS NULL OR m.region = ${query.region})
+          AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
+        GROUP BY m.id
+        ORDER BY avg_score DESC NULLS LAST, rating_count DESC, m.created_at DESC
+        LIMIT ${pageSize} OFFSET ${skip}
+      `);
 
-      const materialIds = allItems.map((item) => item.id);
-      const [total, aggregates] = await Promise.all([
-        this.prisma.material.count({ where }),
-        materialIds.length
-          ? this.prisma.rating.groupBy({
-              by: ['materialId'],
-              where: { materialId: { in: materialIds } },
-              _avg: { score: true },
-              _count: { score: true },
-            })
-          : Promise.resolve([]),
-      ]);
-
-      const aggregateMap = new Map(
-        aggregates.map((row) => [row.materialId, { avgScore: row._avg.score, ratingCount: row._count.score }]),
-      );
-
-      const sortedItems = [...allItems].sort((left, right) => {
-        const leftAggregate = aggregateMap.get(left.id);
-        const rightAggregate = aggregateMap.get(right.id);
-
-        const avgDiff = (rightAggregate?.avgScore ?? -1) - (leftAggregate?.avgScore ?? -1);
-        if (avgDiff !== 0) {
-          return avgDiff;
-        }
-
-        const countDiff = (rightAggregate?.ratingCount ?? 0) - (leftAggregate?.ratingCount ?? 0);
-        if (countDiff !== 0) {
-          return countDiff;
-        }
-
-        return right.createdAt.getTime() - left.createdAt.getTime();
-      });
-
-      const pagedItems = sortedItems.slice(skip, skip + pageSize);
+      const total = ratingRows[0] ? Number(ratingRows[0].total_count) : 0;
 
       return {
         page,
         pageSize,
         total,
-        items: pagedItems.map((item) => ({
+        items: ratingRows.map((item) => ({
           id: item.id,
           title: item.title,
           description: item.description,
           stage: item.stage,
           grade: item.grade,
           subject: item.subject,
+          kind: item.kind,
           year: item.year,
           region: item.region,
           visibility: item.visibility,
           createdAt: item.createdAt,
-          avg_score: aggregateMap.get(item.id)?.avgScore ?? null,
-          download_count: item._count.downloads,
+          avg_score: item.avg_score !== null ? Number(item.avg_score) : null,
+          download_count: Number(item.download_count),
         })),
       };
     }
@@ -259,6 +247,7 @@ export class MaterialsService {
           stage: true,
           grade: true,
           subject: true,
+          kind: true,
           year: true,
           region: true,
           visibility: true,
@@ -295,6 +284,7 @@ export class MaterialsService {
         stage: item.stage,
         grade: item.grade,
         subject: item.subject,
+        kind: item.kind,
         year: item.year,
         region: item.region,
         visibility: item.visibility,
@@ -314,6 +304,7 @@ export class MaterialsService {
         stage: true,
         grade: true,
         subject: true,
+        kind: true,
         year: true,
         region: true,
         visibility: true,

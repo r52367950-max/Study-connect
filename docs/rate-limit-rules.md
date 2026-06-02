@@ -23,6 +23,7 @@
 | `POST /auth/login` | `auth-login-ip` | 25 / 60s | 登录 IP 速率上限 |
 | `POST /auth/login` | `auth-login-ip-email` | 20 / 60s（默认） | 登录 IP+邮箱组合限流（可 env 覆盖） |
 | `POST /auth/login` | `auth-login-lock` | 5 次失败后锁定 5 分钟（默认） | 登录失败熔断锁，按 **标识 + 客户端 IP** 维度（见下方说明） |
+| `POST /auth/login` | `auth-login-ip-fail` | 10 次失败后锁定 5 分钟（默认，**仅 IP 维度**） | 纯 IP 失败计数；防凭据填充（同 IP 轮换 identifier）；N 可通过 `RATE_LIMIT_LOGIN_IP_ONLY_MAX_FAILURES` 覆盖 |
 | `POST /auth/logout` | `auth-logout` | 40 / 60s | 限制登出洪泛 |
 | `POST /auth/change-password` | `auth-change-password` | 5 / 60s | 限制高成本密码校验被持续打满 |
 | `POST /materials` | `materials-upload` | 10 / 60s | 上传接口保护 |
@@ -37,6 +38,7 @@
 - `RATE_LIMIT_LOGIN_MAX_FAILURES`（默认 5）
 - `RATE_LIMIT_LOGIN_FAILURE_WINDOW_MS`（默认 60_000）
 - `RATE_LIMIT_LOGIN_LOCK_MS`（默认 300_000）
+- `RATE_LIMIT_LOGIN_IP_ONLY_MAX_FAILURES`（默认 10）— 纯 IP 维度失败阈值，用于检测凭据填充攻击
 
 ### 登录失败锁的键维度（安全设计取舍）
 
