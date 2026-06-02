@@ -6,7 +6,7 @@ import { MaterialInfiniteList } from '@/components/materials/material-infinite-l
 import { Button } from '@/components/ui/button'
 
 export default function PageSubject({ params }: { params: { name: string } }) {
-  const subject = params.name
+  const subject = decodeURIComponent(params.name)
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">

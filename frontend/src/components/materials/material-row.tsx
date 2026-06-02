@@ -1,8 +1,7 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { Star, Download } from 'lucide-react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { MaterialRowItem } from '@/types'
@@ -13,6 +12,7 @@ import { useAuth } from '@/hooks/use-auth'
 import { useFavorites } from '@/hooks/use-favorites'
 import { SubjectIcon } from '@/components/study/subject-icon'
 import { KindTag } from '@/components/materials/kind-tag'
+import { LoginPromptDialog } from '@/components/shared/login-prompt-dialog'
 import { toast } from '@/components/ui/use-toast'
 import { cn, formatScore } from '@/lib/utils'
 
@@ -32,9 +32,9 @@ export function resetReportedViewIds(): void {
 }
 
 export function MaterialRow({ material }: MaterialRowProps) {
-  const router = useRouter()
   const queryClient = useQueryClient()
   const { isLoggedIn } = useAuth()
+  const [loginPromptOpen, setLoginPromptOpen] = useState(false)
   const { favoriteIds } = useFavorites()
   const isFav = favoriteIds.has(material.id)
   const rowRef = useRef<HTMLDivElement | null>(null)
@@ -106,7 +106,7 @@ export function MaterialRow({ material }: MaterialRowProps) {
     e.preventDefault()
     e.stopPropagation()
     if (!isLoggedIn) {
-      router.push(`/login?redirect=${encodeURIComponent(window.location.pathname)}`)
+      setLoginPromptOpen(true)
       return
     }
     mutation.mutate()
@@ -158,6 +158,11 @@ export function MaterialRow({ material }: MaterialRowProps) {
           )}
         />
       </button>
+      <LoginPromptDialog
+        open={loginPromptOpen}
+        onOpenChange={setLoginPromptOpen}
+        message="登录后即可收藏资料"
+      />
     </div>
   )
 }

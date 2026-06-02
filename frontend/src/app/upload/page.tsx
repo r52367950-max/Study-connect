@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -43,26 +43,43 @@ export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [fileError, setFileError] = useState('')
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
 
   const {
     register,
     handleSubmit,
     setValue,
     watch,
-    formState: { errors },
+    formState: { errors, isDirty },
     setError,
   } = useForm<FormValues>({ resolver: zodResolver(schema) })
+
+  // Warn before leaving if the user has selected a file or started filling in the form
+  const isDirtyOrHasFile = isDirty || !!file
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (!isDirtyOrHasFile) return
+      e.preventDefault()
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [isDirtyOrHasFile])
 
   const { mutate, isPending } = useMutation({
     mutationFn: (values: FormValues) => {
       if (!file) throw new Error('请选择文件')
-      return uploadMaterial({
-        ...values,
-        year: values.year ? Number(values.year) : undefined,
-        file,
-      })
+      setUploadProgress(0)
+      return uploadMaterial(
+        {
+          ...values,
+          year: values.year ? Number(values.year) : undefined,
+          file,
+        },
+        (pct) => setUploadProgress(pct),
+      )
     },
     onSuccess: () => {
+      setUploadProgress(null)
       toast({
         title: '上传成功',
         description: '资料已提交，等待管理员审核后公开',
@@ -70,6 +87,7 @@ export default function UploadPage() {
       router.push(`/materials`)
     },
     onError: (err) => {
+      setUploadProgress(null)
       setError('root', { message: getErrorMessage(err) })
     },
   })
@@ -238,6 +256,18 @@ export default function UploadPage() {
         {errors.root && (
           <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {errors.root.message}
+          </div>
+        )}
+
+        {uploadProgress !== null && (
+          <div className="space-y-1">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-foreground transition-all duration-200"
+                style={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+            <p className="text-right text-xs text-muted-foreground">{uploadProgress}%</p>
           </div>
         )}
 
