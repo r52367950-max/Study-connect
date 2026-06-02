@@ -66,17 +66,24 @@ export class AdminService {
   }
 
   async banUser(userId: string) {
-    return this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        status: UserStatus.BANNED,
-        tokenVersion: { increment: 1 },
-      },
-      select: {
-        id: true,
-        status: true,
-      },
-    });
+    try {
+      return await this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          status: UserStatus.BANNED,
+          tokenVersion: { increment: 1 },
+        },
+        select: {
+          id: true,
+          status: true,
+        },
+      });
+    } catch (error) {
+      if (this.isRecordNotFoundError(error)) {
+        throw new NotFoundException('User not found');
+      }
+      throw error;
+    }
   }
 
   private async updateMaterialReview(

@@ -1,6 +1,10 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Matches, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
+
+/** B11: restrict ranker to known values; ranker_v2 is a placeholder (same algorithm as v1) */
+export const VALID_RANKERS = ['ranker_v1', 'ranker_v2'] as const;
+export type ValidRanker = (typeof VALID_RANKERS)[number];
 
 export class RecommendQueryDto {
   @ApiPropertyOptional({ example: 6, default: 6 })
@@ -11,9 +15,8 @@ export class RecommendQueryDto {
   @Max(30)
   limit?: number;
 
-  @ApiPropertyOptional({ example: 'ranker_v1' })
+  @ApiPropertyOptional({ example: 'ranker_v1', enum: VALID_RANKERS, description: 'ranker_v2 is a placeholder (same algorithm as v1)' })
   @IsOptional()
-  @IsString()
-  @Matches(/^[a-zA-Z0-9_-]{1,32}$/)
-  ranker?: string;
+  @IsIn(VALID_RANKERS)
+  ranker?: ValidRanker;
 }
