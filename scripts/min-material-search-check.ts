@@ -243,19 +243,25 @@ class PrismaServiceMock {
     },
   };
 
-  // B1: the RATING sort branch now uses $queryRaw(...) raw-SQL aggregation (the
-  // keyword branch already did). Mirror them in-memory: the keyword query
-  // (contains "similarity") is logged but not asserted by this check, so return
-  // []; otherwise build the RATING aggregation rows (avg_score / rating_count /
-  // download_count / total_count) sorted by average score, like the real SQL.
+  // B1/C1-C3: the RATING sort branch uses $queryRaw(...) raw-SQL aggregation (the keyword
+  // branch already did). Both now contain similarity() (C2 added the keyword filter to the
+  // rating branch), so discriminate on the SELECT shape, not on "similarity":
+  //   - RATING aggregation query → selects avg_score → return sorted rating rows.
+  //   - C3 out-of-range count fallback → "AS total" → return [{ total }].
+  //   - keyword search query → neither → logged-not-asserted, return [].
   $queryRaw = async (sql: { strings?: string[]; sql?: string }): Promise<unknown[]> => {
     const text = sql?.strings ? sql.strings.join(' ') : String(sql?.sql ?? '');
-    if (text.includes('similarity')) {
-      return [];
-    }
-    const filtered = this.materials.filter(
+    const approvedPublic = this.materials.filter(
       (m) => m.status === 'APPROVED' && m.visibility === 'PUBLIC',
     );
+    if (!text.includes('avg_score')) {
+      // C3 count fallback selects "COUNT(*)::bigint AS total"; keyword search selects neither.
+      if (text.includes('AS total')) {
+        return [{ total: BigInt(approvedPublic.length) }];
+      }
+      return [];
+    }
+    const filtered = approvedPublic;
     const rows = filtered.map((m) => {
       const materialRatings = this.ratings.filter((r) => r.materialId === m.id);
       const avg = materialRatings.length

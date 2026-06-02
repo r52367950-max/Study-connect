@@ -130,10 +130,10 @@ export class MaterialsService {
         WHERE m.status = 'APPROVED'
           AND m.visibility = 'PUBLIC'
           AND (m.file_safety_status = 'PASSED' OR m.file_safety_status IS NULL)
-          AND (${query.subject ?? null}::text IS NULL OR m.subject = ${query.subject})
-          AND (${query.stage ?? null}::text IS NULL OR m.stage = ${query.stage})
-          AND (${query.grade ?? null}::text IS NULL OR m.grade = ${query.grade})
-          AND (${query.region ?? null}::text IS NULL OR m.region = ${query.region})
+          AND (${query.subject ?? null}::text IS NULL OR LOWER(m.subject) = LOWER(${query.subject ?? null}))
+          AND (${query.stage ?? null}::text IS NULL OR LOWER(m.stage) = LOWER(${query.stage ?? null}))
+          AND (${query.grade ?? null}::text IS NULL OR LOWER(m.grade) = LOWER(${query.grade ?? null}))
+          AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
           AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
           AND (similarity(m.title, ${q}) > 0 OR similarity(COALESCE(m.description, ''), ${q}) > 0)
         GROUP BY m.id
@@ -169,7 +169,12 @@ export class MaterialsService {
     }
 
     if (sort === MaterialSort.RATING) {
-      // B1 fix: use raw SQL with LEFT JOIN aggregation + LIMIT/OFFSET to avoid full-table load into memory
+      // B1 fix: use raw SQL with LEFT JOIN aggregation + LIMIT/OFFSET to avoid full-table load into memory.
+      // C1: subject/stage/grade/region compared case-insensitively (LOWER = LOWER), matching
+      //     buildApprovedWhere's `mode: 'insensitive'` so rating sort returns the same set as other sorts.
+      // C2: when `q` is supplied, keep the keyword (trigram) filter — the keyword branch above only
+      //     runs for non-RATING sorts, so without this `?q=...&sort=rating` would ignore the keyword.
+      const q = query.q && query.q.trim() ? query.q.trim() : null;
       const ratingRows = await this.prisma.$queryRaw<Array<{
         id: string;
         title: string;
@@ -200,17 +205,37 @@ export class MaterialsService {
         WHERE m.status = 'APPROVED'
           AND m.visibility = 'PUBLIC'
           AND (m.file_safety_status = 'PASSED' OR m.file_safety_status IS NULL)
-          AND (${query.subject ?? null}::text IS NULL OR m.subject = ${query.subject})
-          AND (${query.stage ?? null}::text IS NULL OR m.stage = ${query.stage})
-          AND (${query.grade ?? null}::text IS NULL OR m.grade = ${query.grade})
-          AND (${query.region ?? null}::text IS NULL OR m.region = ${query.region})
+          AND (${query.subject ?? null}::text IS NULL OR LOWER(m.subject) = LOWER(${query.subject ?? null}))
+          AND (${query.stage ?? null}::text IS NULL OR LOWER(m.stage) = LOWER(${query.stage ?? null}))
+          AND (${query.grade ?? null}::text IS NULL OR LOWER(m.grade) = LOWER(${query.grade ?? null}))
+          AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
           AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
+          AND (${q}::text IS NULL OR similarity(m.title, ${q}) > 0 OR similarity(COALESCE(m.description, ''), ${q}) > 0)
         GROUP BY m.id
         ORDER BY avg_score DESC NULLS LAST, rating_count DESC, m.created_at DESC
         LIMIT ${pageSize} OFFSET ${skip}
       `);
 
-      const total = ratingRows[0] ? Number(ratingRows[0].total_count) : 0;
+      // C3: COUNT(*) OVER() only yields a value on non-empty pages. For an out-of-range
+      // OFFSET (skip > 0 with no rows) fall back to a dedicated count so pagination metadata
+      // stays correct instead of collapsing to total: 0 while earlier pages have matches.
+      let total = ratingRows[0] ? Number(ratingRows[0].total_count) : 0;
+      if (ratingRows.length === 0 && skip > 0) {
+        const countRows = await this.prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`
+          SELECT COUNT(*)::bigint AS total
+          FROM materials m
+          WHERE m.status = 'APPROVED'
+            AND m.visibility = 'PUBLIC'
+            AND (m.file_safety_status = 'PASSED' OR m.file_safety_status IS NULL)
+            AND (${query.subject ?? null}::text IS NULL OR LOWER(m.subject) = LOWER(${query.subject ?? null}))
+            AND (${query.stage ?? null}::text IS NULL OR LOWER(m.stage) = LOWER(${query.stage ?? null}))
+            AND (${query.grade ?? null}::text IS NULL OR LOWER(m.grade) = LOWER(${query.grade ?? null}))
+            AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
+            AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
+            AND (${q}::text IS NULL OR similarity(m.title, ${q}) > 0 OR similarity(COALESCE(m.description, ''), ${q}) > 0)
+        `);
+        total = countRows[0] ? Number(countRows[0].total) : 0;
+      }
 
       return {
         page,

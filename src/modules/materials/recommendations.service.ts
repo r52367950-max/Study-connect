@@ -71,10 +71,13 @@ export class RecommendationsService {
     const viewEventCount =
       basePhase === 'phase-0'
         ? 0
-        : await this.prisma.viewEvent.findMany({
+        : // C4: only the phase-2 threshold check matters, so cap the distinct lookup at
+          // VIEW_EVENT_PHASE2_MIN rows instead of loading the user's entire view history.
+          await this.prisma.viewEvent.findMany({
             where: { userId: user.id },
             select: { materialId: true },
             distinct: ['materialId'],
+            take: VIEW_EVENT_PHASE2_MIN,
           }).then((rows) => rows.length);
     const phase = await this.pickStrategy(user, { viewEventCount, basePhase });
     const dynamicViewedKinds =

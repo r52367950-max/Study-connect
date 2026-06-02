@@ -57,6 +57,26 @@ function run(): void {
   assert(fromIp1 !== fromIp2, 'same identity from different IPs must produce distinct lock keys');
   console.log('login-lock per-IP isolation check passed');
 
+  // ---- C5: a successful login must NOT reset the pure-IP credential-stuffing counter ----
+  // Otherwise an attacker controlling one valid account could interleave a success between
+  // failed attempts against rotating identifiers to keep the IP-only counter below the lock.
+  const stuffSvc = new RateLimitService();
+  const attackIp = '198.51.100.50';
+  const failOpts = { ip: attackIp, failureWindowMs: 60_000, maxFailures: 100, lockMs: 300_000, ipOnlyMaxFailures: 3 };
+  stuffSvc.recordLoginFailure({ identifier: 'victim-a@example.com', ...failOpts }); // IP fails: 1
+  stuffSvc.recordLoginFailure({ identifier: 'victim-b@example.com', ...failOpts }); // IP fails: 2
+  stuffSvc.recordLoginSuccess('attacker-own@example.com', attackIp); // must NOT reset IP-only counter
+  assert(
+    stuffSvc.checkLoginIpOnlyLock(attackIp).locked === false,
+    'IP-only lock should not engage before threshold',
+  );
+  stuffSvc.recordLoginFailure({ identifier: 'victim-c@example.com', ...failOpts }); // IP fails: 3 -> lock
+  assert(
+    stuffSvc.checkLoginIpOnlyLock(attackIp).locked === true,
+    'successful login must not reset the IP-only failure counter (credential-stuffing bypass)',
+  );
+  console.log('login-ip-only counter survives success check passed');
+
   console.log('min-rate-limit-identity-check passed');
 }
 

@@ -135,9 +135,11 @@ export class RateLimitService {
     for (const key of this.buildLoginLockKeys(identifier, ip)) {
       this.loginLocks.delete(key);
     }
-    // On successful login reset the IP-only failure counter so legitimate shared-NAT
-    // users are not penalised for a previous attacker attempt from the same IP.
-    this.loginLocks.delete(this.buildLoginIpOnlyKey(ip));
+    // C5 (security): intentionally do NOT clear the pure-IP failure counter on success.
+    // Clearing it let an attacker who controls one valid account interleave a successful
+    // login between failed attempts against other identifiers to keep resetting the
+    // credential-stuffing counter before it ever locks. The IP-only counter instead ages
+    // out naturally via failureWindowMs, which still spares legitimate shared-NAT users.
   }
 
   checkLoginIpOnlyLock(ip: string): { locked: boolean; retryAfterMs: number } {

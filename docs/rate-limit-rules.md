@@ -23,7 +23,7 @@
 | `POST /auth/login` | `auth-login-ip` | 25 / 60s | 登录 IP 速率上限 |
 | `POST /auth/login` | `auth-login-ip-email` | 20 / 60s（默认） | 登录 IP+邮箱组合限流（可 env 覆盖） |
 | `POST /auth/login` | `auth-login-lock` | 5 次失败后锁定 5 分钟（默认） | 登录失败熔断锁，按 **标识 + 客户端 IP** 维度（见下方说明） |
-| `POST /auth/login` | `auth-login-ip-fail` | 10 次失败后锁定 5 分钟（默认，**仅 IP 维度**） | 纯 IP 失败计数；防凭据填充（同 IP 轮换 identifier）；N 可通过 `RATE_LIMIT_LOGIN_IP_ONLY_MAX_FAILURES` 覆盖 |
+| `POST /auth/login` | `auth-login-ip-fail` | 10 次失败后锁定 5 分钟（默认，**仅 IP 维度**） | 纯 IP 失败计数；防凭据填充（同 IP 轮换 identifier）；N 可通过 `RATE_LIMIT_LOGIN_IP_ONLY_MAX_FAILURES` 覆盖。**成功登录不重置该计数**（否则攻击者用一个已知账号穿插成功登录即可绕过），仅靠失败窗口自然过期 |
 | `POST /auth/logout` | `auth-logout` | 40 / 60s | 限制登出洪泛 |
 | `POST /auth/change-password` | `auth-change-password` | 5 / 60s | 限制高成本密码校验被持续打满 |
 | `POST /materials` | `materials-upload` | 10 / 60s | 上传接口保护 |
