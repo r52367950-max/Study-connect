@@ -15,8 +15,8 @@
 | 阶段 3 | DirB shell + 5 页移植（破坏性覆盖 `/materials`，新增 `(app)` 路由组） | ✅ 已完成（已 merge） | PR #71（commit `3f0a129`） |
 | 阶段 4 | HANDOFF P0：学校 autocomplete + ⌘K 命令面板 + 真实分页接入 | ✅ 已完成（已 merge，已验收） | PR #72（commit `db397cb`） |
 | 阶段 5 | HANDOFF P1+P2：切页 loading/动效/年级升级/响应式 + 推荐算法升级 + 协同隐私 + 浏览埋点 | ✅ 已完成（已 merge，已验收） | PR #73（commit `5acda5b`）；后端推荐引擎（5.6/5.7 + P3 冷启动）随工作流 P 先期落地；余低级打磨项见 review（年级弹窗跨用户抑制、dwell 抽取等） |
-| 阶段 6 | HANDOFF P3：正式退出登录 + 空状态插画 + 微信 OAuth + 组卷导出 PDF/Word | ⬜ 未开始 ← **当前起点** | 最重一阶段，建议拆分：6.1+6.2 轻量包先行；6.3 微信需 ICP 备案 + 安全门禁；6.4 组卷依赖 Redis/BullMQ（工作流 P2） |
-| 工作流 S | 安全与稳定性加固（含生产部署前必修红线） | 🔄 进行中（S1/S3/S4/S5/S6/S7/S9/S10 大部分已在代码落地；S2/S8 有残留 bug；S-data/CI-net 新发现待修） | 全量代码审计（4 域）确认 S1–S10 大部分已实现；6 个残留/新问题待 round-2 修复：S2a TRUST_PROXY 门控反直觉、S2b 手机号限流不归一化、S2c 登录锁无 IP 维度（待评估）、S8b file-scan 终态一律错标 TIMEOUT、S-data `buildApprovedWhere` 缺扫描状态过滤、CI-net `min-admin-review` 漏 OTP bypass → CI 假绿；见 §S 末尾详情 |
+| 阶段 6 | HANDOFF P3：正式退出登录 + 空状态插画 + 微信 OAuth + 组卷导出 PDF/Word | 🔄 进行中（6.1 退出登录 + 6.2 空状态已完成；6.3/6.4 未开始 ← **当前起点**） | 6.1+6.2 轻量包已 merge（PR #76，`claude/elegant-goldberg-8HP3z`）；剩 6.3 微信需 ICP 备案 + 安全门禁、6.4 组卷依赖 Redis/BullMQ（工作流 P2） |
+| 工作流 S | 安全与稳定性加固（含生产部署前必修红线） | 🔄 进行中（S1/S3/S4/S5/S6/S7/S9/S10 已落地；S2a/S2b/S2c/S8b/S-data/CI-net 已修；剩 S11 = 工作流 P2 Redis） | round-2 已 merge（PR #78，`claude/workflow-s2-hardening`）：S2a TRUST_PROXY 安全解析、S2b 手机号归一化限流、S2c 登录锁加 IP 维度（取舍记入 `docs/rate-limit-rules.md`）、S8b file-scan 终态分类 + 重试、S-data `buildApprovedWhere` 加扫描状态过滤、CI-net `min-admin-review` 修复 + `set -o pipefail` 真门禁 + D5 health 启动修复；仅剩 S11 限流/OTP 迁 Redis（并入 P2） |
 | 工作流 P | 性能与平台化（搜索 / 缓存 / Node 22 / 推荐冷启动 / 监控） | 🔄 进行中（P5 已完成：Pino + Sentry + /health；P3 推荐冷启动 phase-0~3 已落地；Redis/队列/metrics 后续） | 推荐响应已回传 `rankerId`、`?ranker=` 已接入；`ranker_v2` 目前为同算法占位（无独立打分），见 §P3 |
 
 状态图例：⬜ 未开始 / 🔄 进行中 / ✅ 已完成。
@@ -258,16 +258,21 @@
 - **S9** ✅（部分）：`upload-security.util.ts` 文件名 sanitize；DTO 已有部分文本长度约束。
 - **S10** ✅：access token payload 已只含 `sub/role/ver`，无 email/phone 快照。
 
-**已有实现但存在残留 bug 或新发现问题（待 round-2 修复，目标分支 `claude/workflow-s2-*`）**：
+**round-2 修复（已 merge，PR #78 `claude/workflow-s2-hardening`）**：
 
-| 编号 | 严重度 | 问题 | 定位 |
+| 编号 | 严重度 | 原问题 | 修复 |
 |---|---|---|---|
-| S2a | 🔴 | TRUST_PROXY 门控反直觉：guard 用 `Boolean(app.get('trust proxy'))` → `Boolean("0")===true`，本想关闭信任的值反而启用 XFF 分支 | `src/main.ts:36-43`、`src/common/rate-limit.guard.ts:114-122` |
-| S2b | 🟠 | 手机号限流不归一化：`extractIdentifier` 只 `trim()`，而 `auth.service` 用 `normalizePhone()`，格式变体落不同限流桶 | `src/common/rate-limit.guard.ts:124-136` |
-| S2c | 🟠 | 登录失败锁仅按标识、无 IP 维度 → 任意 IP 发 5 次错误凭据可循环锁受害者账号（需先评估并在 `docs/rate-limit-rules.md` 记录取舍） | `src/common/rate-limit.service.ts:116-118` |
-| S8b | 🟠 | file-scan 终态错标：catch 里无论真实原因一律 `TIMEOUT`；`FAILED` job 永不重试 → 资料永久 404 | `src/modules/materials/file-scan.service.ts:67-83` |
-| S-data | 🟠 | `buildApprovedWhere` 缺 `fileSafetyStatus` 过滤：列表/RATING 排序展示 `QUARANTINED/SCANNING/FAILED` 资料，点进去/下载却 404（死链 + 未过扫描元数据泄露） | `src/modules/materials/materials.service.ts:538` |
-| CI-net | 🔴 | `min-admin-review-check.ts` 漏 `AUTH_OTP_TEST_BYPASS=true` → 脚本失败；`security-gate.yml` `\| tee` 吞退出码 → CI 假绿；行 251 误判 401（应 403） | `scripts/min-admin-review-check.ts`、`.github/workflows/security-gate.yml` |
+| S2a | 🔴 | TRUST_PROXY 门控反直觉：guard 用 `Boolean(app.get('trust proxy'))` → `Boolean("0")===true`，本想关闭信任的值反而启用 XFF 分支 | 新增 `src/common/security/trust-proxy.ts` `parseTrustProxy`：空/`0` 关闭、正整数设 hop 数、非法值拒启；guard 改用 `typeof setting === 'number' && setting > 0` 门控 |
+| S2b | 🟠 | 手机号限流不归一化：`extractIdentifier` 只 `trim()`，与 `auth.service` 的 `normalizePhone()` 不一致，格式变体落不同限流桶 | `extractIdentifier` 复用同一 `normalizePhone` + 小写化，限流键与锁键两侧对齐 |
+| S2c | 🟠 | 登录失败锁仅按标识、无 IP 维度 → 任意 IP 发 5 次错误凭据可循环锁受害者账号 | 锁键改 (标识, 客户端 IP)；取舍记入 `docs/rate-limit-rules.md` |
+| S8b | 🟠 | file-scan 终态错标：catch 里无论真实原因一律 `TIMEOUT`；`FAILED` job 永不重试 → 资料永久 404 | 区分非法文件(FAILED)/超时(TIMEOUT)/MinIO 拉取失败；瞬时错误指数退避重试；`SCAN_TIMEOUT` 定时器及时 clear |
+| S-data | 🟠 | `buildApprovedWhere` 缺 `fileSafetyStatus` 过滤：列表/RATING 排序展示 `QUARANTINED/SCANNING/FAILED` 资料，点进去/下载却 404 | `buildApprovedWhere` 加 `fileSafetyStatus ∈ {PASSED, null}`，四条读路径一致 |
+| CI-net | 🔴 | `min-admin-review-check.ts` 漏 `AUTH_OTP_TEST_BYPASS` → 脚本失败；`security-gate.yml` 吞退出码 → CI 假绿；行 251 误判 401 | 脚本补 OTP bypass + CSRF；gate 加 `set -o pipefail` 跑 `min-all` 真门禁；USER→admin 改判 403 |
+| D5 | 🔴 | health 模块缺 `TerminusModule`、indicator 未 `@Injectable` → AppModule 起不来、所有 min-* 启动期崩 | 抽出 `prisma.health.ts` 破环 + `@Injectable` + `HealthIndicatorService`；`HealthModule` 导入 `TerminusModule` |
+
+> **剩余**：S11（限流 / OTP 计数迁 Redis）—— 并入工作流 P2（见下）。
+>
+> **基建尾巴（2026-06 发现）**：codex P5（Pino + Sentry，PR #68–70）往 `package.json` 加了 `nestjs-pino`/`pino-*`/`@sentry/node` 等依赖却没同步 `package-lock.json` → Security Gate 的 `npm ci` 自 05-16 起一直失败（早于 #78 把"假绿"修成真红，故 PR auto-merge 时未被拦）。已重生成锁文件 + 把 `package.json`/`package-lock.json` 纳入 gate 触发路径修复。
 
 ---
 
