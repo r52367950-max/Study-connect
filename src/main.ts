@@ -90,6 +90,9 @@ async function bootstrap() {
     });
   }
 
+  // B5: enable NestJS shutdown hooks so PrismaService.$disconnect() is called on SIGTERM
+  app.enableShutdownHooks();
+
   await app.listen(process.env.PORT ? Number(process.env.PORT) : 3000);
 }
 
