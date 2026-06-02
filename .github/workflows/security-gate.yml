@@ -7,6 +7,8 @@ on:
       - 'scripts/**'
       - 'docs/security-gate-policy.md'
       - '.github/workflows/security-gate.yml'
+      - 'package.json'
+      - 'package-lock.json'
   push:
     branches:
       - main
@@ -16,6 +18,8 @@ on:
       - 'scripts/**'
       - 'docs/security-gate-policy.md'
       - '.github/workflows/security-gate.yml'
+      - 'package.json'
+      - 'package-lock.json'
 
 jobs:
   rate-limit-evidence:
