@@ -300,7 +300,7 @@
 在 `RecommendationsService` 加 `pickStrategy(user, signals)` 返回权重，按以下分层：
 - Phase 0（匿名/未 onboarded）：纯热度+质量+新鲜度（`log10(dl+1)*0.8 + (avg-4)*2 + freshness`），文案"热门资料"。
 - Phase 1（已 onboarded，个人信号少）：**内容匹配（subject/grade/stage/city/kind）—— 已实现，就是冷启动核心**，文案沿用现有匹配理由。
-- Phase 2（该用户 ≥ N=20 条 view events）：用 `ViewEvent` 聚合偏好（按 kind 的 CTR、近期 subject）替代静态 `viewedKinds`。对应阶段 5 P2。
+- Phase 2（该用户看过 ≥ N=20 **不同**资料）：用 `ViewEvent` 聚合偏好（按 kind 的 CTR、近期 subject）替代静态 `viewedKinds`。对应阶段 5 P2。【B8 修正】切换指标已从"总事件数 COUNT(*)"改为"去重资料数 COUNT(DISTINCT materialId)"，与前端每会话每资料一次去重的语义对齐；实测产生速率更贴合预期。
 - Phase 3（该校 ≥ K_dense=10 个 onboarded 用户 **且** 存在 ≥3 同事重叠）：才开 `collaborativeScore`（现在只要有 `schoolId`+opt-in 就一直算 `$queryRaw`，应按每校密度门控）。
 - 切换指标：per-user `viewEventCount >= 20` → Phase 2；per-school onboarded 数 `>= 10` → Phase 3；全局看推荐 CTR（需给 `ViewEvent` 加 `source:'recommend'` 或单独表）——Phase≥2 CTR 不显著优于 Phase 1 则回退；覆盖度不足用热度补位（`.slice(0,limit)` 已隐式做到）。
 - 实现：每校密度缓存成小计数器；开始记推荐曝光/点击让切换可度量；A/B 用已有 `rankerId` + `ranker_v2` 并行对照。

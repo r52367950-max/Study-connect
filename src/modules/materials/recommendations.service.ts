@@ -64,10 +64,18 @@ export class RecommendationsService {
     const limit = options.limit ?? DEFAULT_LIMIT;
     const ranker = options.ranker ?? DEFAULT_RANKER;
     const basePhase = this.pickBasePhase(user);
+    // B8: count distinct materialIds rather than total rows so the phase-2 threshold
+    // reflects "how many different materials has the user seen" rather than total events.
+    // This aligns the metric with the frontend's per-session per-material impression dedup
+    // and avoids the threshold being reached artificially fast via dwell updates.
     const viewEventCount =
       basePhase === 'phase-0'
         ? 0
-        : await this.prisma.viewEvent.count({ where: { userId: user.id } });
+        : await this.prisma.viewEvent.findMany({
+            where: { userId: user.id },
+            select: { materialId: true },
+            distinct: ['materialId'],
+          }).then((rows) => rows.length);
     const phase = await this.pickStrategy(user, { viewEventCount, basePhase });
     const dynamicViewedKinds =
       phase === 'phase-2' || phase === 'phase-3'

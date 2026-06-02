@@ -63,6 +63,8 @@ export class FavoritesService {
               year: true,
               region: true,
               createdAt: true,
+              // B7: include download count aggregate
+              _count: { select: { downloads: true } },
             },
           },
         },
@@ -70,12 +72,31 @@ export class FavoritesService {
       this.prisma.favorite.count({ where: { userId } }),
     ]);
 
+    // B7: fetch avg_score for all favorited materials in one batch query
+    const materialIds = items.map((row) => row.material.id);
+    const ratingAggregates = materialIds.length
+      ? await this.prisma.rating.groupBy({
+          by: ['materialId'],
+          where: { materialId: { in: materialIds } },
+          _avg: { score: true },
+          _count: { score: true },
+        })
+      : [];
+    const ratingMap = new Map(ratingAggregates.map((row) => [row.materialId, row._avg.score]));
+
     return {
-      items: items.map((row) => ({
-        id: row.id,
-        favoritedAt: row.createdAt.toISOString(),
-        material: row.material,
-      })),
+      items: items.map((row) => {
+        const { _count, ...materialBase } = row.material;
+        return {
+          id: row.id,
+          favoritedAt: row.createdAt.toISOString(),
+          material: {
+            ...materialBase,
+            avg_score: ratingMap.get(row.material.id) ?? null,
+            download_count: _count.downloads,
+          },
+        };
+      }),
       page,
       pageSize,
       total,
