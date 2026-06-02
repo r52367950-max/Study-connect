@@ -74,13 +74,32 @@ export function MaterialRow({ material }: MaterialRowProps) {
 
   const mutation = useMutation({
     mutationFn: () => (isFav ? removeFavorite(material.id) : addFavorite(material.id)),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['favorites'] })
-      queryClient.invalidateQueries({ queryKey: ['materials'] })
-      queryClient.invalidateQueries({ queryKey: ['recommendations'] })
+    // Optimistic update: flip the star immediately without waiting for the RTT.
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['favorites'] })
+      const prev = queryClient.getQueryData<ReturnType<typeof Array>>(['favorites'])
+      queryClient.setQueryData<MaterialRowItem[] | undefined>(['favorites'], (old) => {
+        if (!old) return old
+        if (isFav) return old.filter((m: MaterialRowItem) => m.id !== material.id)
+        return [...old, material]
+      })
+      return { prev }
     },
-    onError: (err) =>
-      toast({ variant: 'destructive', title: '操作失败', description: getErrorMessage(err) }),
+    onError: (err, _vars, ctx) => {
+      // Roll back to the snapshot on error
+      if (ctx?.prev !== undefined) {
+        queryClient.setQueryData(['favorites'], ctx.prev)
+      }
+      toast({ variant: 'destructive', title: '操作失败', description: getErrorMessage(err) })
+    },
+    onSettled: () => {
+      // Always re-sync from server to reconcile with other tabs / race conditions
+      void queryClient.invalidateQueries({ queryKey: ['favorites'] })
+      void queryClient.invalidateQueries({ queryKey: ['materials'] })
+      void queryClient.invalidateQueries({ queryKey: ['recommendations'] })
+      // Also invalidate the detail-page cache so the star stays consistent there
+      void queryClient.invalidateQueries({ queryKey: ['material', material.id] })
+    },
   })
 
   const handleStar = (e: React.MouseEvent) => {

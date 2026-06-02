@@ -7,6 +7,7 @@ import { BookOpen, Clock, FileText, GraduationCap, Upload } from 'lucide-react'
 
 import { getMaterials } from '@/lib/api/materials'
 import { GRADES_BY_STAGE, STAGES, SUBJECTS } from '@/components/onboarding/constants'
+import { useAuthStore } from '@/lib/auth-store'
 import { useCommandPaletteStore } from '@/lib/command-palette-store'
 import {
   CommandDialog,
@@ -19,13 +20,32 @@ import {
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/shared/empty-state'
 
-const RECENT_KEY = 'sc-recent-searches'
+const RECENT_KEY_PREFIX = 'sc-recent-searches'
 const MAX_RECENT = 5
+
+// Key is user-scoped to prevent cross-user search history leakage on shared devices.
+// Unauthenticated sessions use an anonymous bucket.
+function recentKey(): string {
+  const userId = useAuthStore.getState().user?.id
+  return userId ? `${RECENT_KEY_PREFIX}:${userId}` : RECENT_KEY_PREFIX
+}
+
+// Clear the recent searches for a given userId. Called on logout to prevent
+// the next user from seeing the previous user's search history.
+export function clearRecentSearches(userId?: string | null): void {
+  if (typeof window === 'undefined') return
+  try {
+    const key = userId ? `${RECENT_KEY_PREFIX}:${userId}` : RECENT_KEY_PREFIX
+    window.localStorage.removeItem(key)
+  } catch {
+    // ignore
+  }
+}
 
 function readRecent(): string[] {
   if (typeof window === 'undefined') return []
   try {
-    const raw = window.localStorage.getItem(RECENT_KEY)
+    const raw = window.localStorage.getItem(recentKey())
     if (!raw) return []
     const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
@@ -38,7 +58,7 @@ function readRecent(): string[] {
 function writeRecent(items: string[]): void {
   if (typeof window === 'undefined') return
   try {
-    window.localStorage.setItem(RECENT_KEY, JSON.stringify(items))
+    window.localStorage.setItem(recentKey(), JSON.stringify(items))
   } catch {
     return
   }

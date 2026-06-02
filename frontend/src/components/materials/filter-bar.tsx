@@ -12,9 +12,7 @@ import {
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import type { MaterialSearchParams, MaterialSort } from '@/types'
-
-const STAGE_OPTIONS = ['小学', '初中', '高中', '大学', '职教']
-const SUBJECT_OPTIONS = ['语文', '数学', '英语', '物理', '化学', '生物', '历史', '地理', '政治', '信息技术']
+import { STAGES, SUBJECTS } from '@/components/onboarding/constants'
 const SORT_OPTIONS: { value: MaterialSort; label: string }[] = [
   { value: 'latest', label: '最新发布' },
   { value: 'downloads', label: '下载最多' },
@@ -77,7 +75,7 @@ export function FilterBar({ params, onChange, onSearch }: FilterBarProps) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="__all__">全部学段</SelectItem>
-            {STAGE_OPTIONS.map((s) => (
+            {STAGES.map((s) => (
               <SelectItem key={s} value={s}>{s}</SelectItem>
             ))}
           </SelectContent>
@@ -92,7 +90,7 @@ export function FilterBar({ params, onChange, onSearch }: FilterBarProps) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="__all__">全部学科</SelectItem>
-            {SUBJECT_OPTIONS.map((s) => (
+            {SUBJECTS.map((s) => (
               <SelectItem key={s} value={s}>{s}</SelectItem>
             ))}
           </SelectContent>

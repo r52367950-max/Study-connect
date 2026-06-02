@@ -22,9 +22,7 @@ import {
 } from '@/components/ui/select'
 import { toast } from '@/components/ui/use-toast'
 import { cn } from '@/lib/utils'
-
-const STAGE_OPTIONS = ['小学', '初中', '高中', '大学', '职教']
-const SUBJECT_OPTIONS = ['语文', '数学', '英语', '物理', '化学', '生物', '历史', '地理', '政治', '信息技术']
+import { STAGES, SUBJECTS } from '@/components/onboarding/constants'
 const ALLOWED_EXTS = ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.zip', '.txt']
 const MAX_SIZE_MB = 50
 
@@ -197,7 +195,7 @@ export default function UploadPage() {
                 <SelectValue placeholder="选择学段" />
               </SelectTrigger>
               <SelectContent>
-                {STAGE_OPTIONS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                {STAGES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -214,7 +212,7 @@ export default function UploadPage() {
                 <SelectValue placeholder="选择学科" />
               </SelectTrigger>
               <SelectContent>
-                {SUBJECT_OPTIONS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                {SUBJECTS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

@@ -58,25 +58,49 @@ export default function AdminPage() {
     enabled: isAdmin,
   })
 
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ['admin', 'pending'] })
+  const invalidatePending = () => {
+    void queryClient.invalidateQueries({ queryKey: ['admin', 'pending'] })
+  }
+
+  // Invalidate public caches so approved/rejected/offline materials appear or
+  // disappear for all users within the current staleTime window.
+  const invalidatePublic = (materialId?: string) => {
+    void queryClient.invalidateQueries({ queryKey: ['materials'] })
+    void queryClient.invalidateQueries({ queryKey: ['recommendations'] })
+    if (materialId) {
+      void queryClient.invalidateQueries({ queryKey: ['material', materialId] })
+    }
   }
 
   const approveMut = useMutation({
     mutationFn: approveMaterial,
-    onSuccess: () => { toast({ title: '已通过审核' }); invalidate() },
+    onSuccess: (_data, id) => {
+      toast({ title: '已通过审核' })
+      invalidatePending()
+      invalidatePublic(id)
+    },
     onError: (err) => toast({ variant: 'destructive', title: '操作失败', description: getErrorMessage(err) }),
   })
 
   const rejectMut = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) => rejectMaterial(id, reason),
-    onSuccess: () => { toast({ title: '已驳回' }); invalidate(); closeDialog() },
+    onSuccess: (_data, { id }) => {
+      toast({ title: '已驳回' })
+      invalidatePending()
+      invalidatePublic(id)
+      closeDialog()
+    },
     onError: (err) => toast({ variant: 'destructive', title: '操作失败', description: getErrorMessage(err) }),
   })
 
   const offlineMut = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) => offlineMaterial(id, reason),
-    onSuccess: () => { toast({ title: '已下线' }); invalidate(); closeDialog() },
+    onSuccess: (_data, { id }) => {
+      toast({ title: '已下线' })
+      invalidatePending()
+      invalidatePublic(id)
+      closeDialog()
+    },
     onError: (err) => toast({ variant: 'destructive', title: '操作失败', description: getErrorMessage(err) }),
   })
 
