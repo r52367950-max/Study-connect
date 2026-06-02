@@ -298,6 +298,8 @@ export class AuthService {
       failureWindowMs: this.getNumber('RATE_LIMIT_LOGIN_FAILURE_WINDOW_MS', 60_000),
       maxFailures: this.getNumber('RATE_LIMIT_LOGIN_MAX_FAILURES', 5),
       lockMs: this.getNumber('RATE_LIMIT_LOGIN_LOCK_MS', 5 * 60_000),
+      // B3: pure-IP failure threshold (default 10) to catch credential-stuffing
+      ipOnlyMaxFailures: this.getNumber('RATE_LIMIT_LOGIN_IP_ONLY_MAX_FAILURES', 10),
     });
   }
 
