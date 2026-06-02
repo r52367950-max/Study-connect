@@ -243,6 +243,53 @@ class PrismaServiceMock {
     },
   };
 
+  // B1: the RATING sort branch now uses $queryRaw(...) raw-SQL aggregation (the
+  // keyword branch already did). Mirror them in-memory: the keyword query
+  // (contains "similarity") is logged but not asserted by this check, so return
+  // []; otherwise build the RATING aggregation rows (avg_score / rating_count /
+  // download_count / total_count) sorted by average score, like the real SQL.
+  $queryRaw = async (sql: { strings?: string[]; sql?: string }): Promise<unknown[]> => {
+    const text = sql?.strings ? sql.strings.join(' ') : String(sql?.sql ?? '');
+    if (text.includes('similarity')) {
+      return [];
+    }
+    const filtered = this.materials.filter(
+      (m) => m.status === 'APPROVED' && m.visibility === 'PUBLIC',
+    );
+    const rows = filtered.map((m) => {
+      const materialRatings = this.ratings.filter((r) => r.materialId === m.id);
+      const avg = materialRatings.length
+        ? materialRatings.reduce((sum, r) => sum + r.score, 0) / materialRatings.length
+        : null;
+      return {
+        id: m.id,
+        title: m.title,
+        description: m.description,
+        stage: m.stage,
+        grade: m.grade,
+        subject: m.subject,
+        kind: (m as unknown as { kind?: string | null }).kind ?? null,
+        year: m.year,
+        region: m.region,
+        visibility: m.visibility,
+        createdAt: m.createdAt,
+        avg_score: avg,
+        rating_count: BigInt(materialRatings.length),
+        download_count: BigInt(this.countDownloads(m.id)),
+      };
+    });
+    rows.sort((a, b) => {
+      const av = a.avg_score ?? -Infinity;
+      const bv = b.avg_score ?? -Infinity;
+      if (bv !== av) return bv - av;
+      const rc = Number(b.rating_count) - Number(a.rating_count);
+      if (rc !== 0) return rc;
+      return b.createdAt.getTime() - a.createdAt.getTime();
+    });
+    const total = rows.length;
+    return rows.map((r) => ({ ...r, total_count: BigInt(total) }));
+  };
+
   seed(): {
     approvedId: string;
     pendingId: string;

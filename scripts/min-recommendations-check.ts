@@ -77,6 +77,10 @@ function buildPrismaStub(opts: {
     viewEvent: {
       count: async () => opts.viewEventCount ?? 25,
       groupBy: async () => [],
+      // B8: recommend() now derives the phase-2 metric from COUNT(DISTINCT materialId)
+      // via findMany({ distinct }).length instead of viewEvent.count.
+      findMany: async () =>
+        Array.from({ length: opts.viewEventCount ?? 25 }, (_, i) => ({ materialId: `m-${i}` })),
     },
     user: {
       count: async () => opts.schoolUserCount ?? 15,
