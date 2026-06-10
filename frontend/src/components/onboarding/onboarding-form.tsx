@@ -105,8 +105,13 @@ export function OnboardingForm({ initialValue, editing = false, onSaved }: Onboa
     return null
   }
   const validateStep2 = (): string | null => {
-    if (!draft.city.trim() && !draft.school && !draft.schoolNameFreeText.trim()) {
-      return '请填写城市或选择学校'
+    // Mirrors the backend completion rule (profileRole && displayName && (city || schoolId)):
+    // a free-text school name alone never satisfies it, so require the city in that mode —
+    // otherwise onboardedAt is never set and OnboardingGate loops back here forever.
+    if (!draft.school && !draft.city.trim()) {
+      return draft.schoolNameFreeText.trim()
+        ? '手动填写学校时请同时填写所在城市'
+        : '请填写城市或选择学校'
     }
     if (draft.stages.length === 0) return '请至少选择一个学段'
     if (draft.subjects.length === 0) return '请至少选择一个学科'
@@ -117,7 +122,10 @@ export function OnboardingForm({ initialValue, editing = false, onSaved }: Onboa
     profileRole: draft.profileRole ?? undefined,
     displayName: draft.displayName.trim() || undefined,
     city: draft.city.trim() || undefined,
-    schoolId: draft.school ? draft.school.id : draft.schoolNameFreeText ? null : undefined,
+    // In free-text mode schoolId must be OMITTED (not null): the backend gives an
+    // explicit schoolId (including null) precedence over schoolNameFreeText, so
+    // sending null would silently discard the hand-typed school name.
+    schoolId: draft.school ? draft.school.id : undefined,
     schoolNameFreeText: draft.schoolNameFreeText.trim() || (draft.school ? null : undefined),
     stages: draft.stages,
     grades: filteredGrades,

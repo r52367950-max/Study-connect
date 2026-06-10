@@ -27,7 +27,9 @@ export function OnboardingGate() {
     if (ONBOARDING_EXEMPT_PREFIXES.some((p) => p === pathname || pathname.startsWith(`${p}/`))) {
       return
     }
-    const redirect = encodeURIComponent(pathname)
+    // Effects only run client-side, so window is available; read the query
+    // string from it (usePathname strips it) to round-trip the full URL.
+    const redirect = encodeURIComponent(`${pathname}${window.location.search ?? ''}`)
     router.replace(`/onboarding?redirect=${redirect}`)
   }, [initialized, isLoggedIn, profile, pathname, router])
 

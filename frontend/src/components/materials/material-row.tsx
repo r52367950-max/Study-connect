@@ -35,7 +35,7 @@ export function MaterialRow({ material }: MaterialRowProps) {
   const queryClient = useQueryClient()
   const { isLoggedIn } = useAuth()
   const [loginPromptOpen, setLoginPromptOpen] = useState(false)
-  const { favoriteIds } = useFavorites()
+  const { favoriteIds, isSuccess: favoritesLoaded } = useFavorites()
   const isFav = favoriteIds.has(material.id)
   const rowRef = useRef<HTMLDivElement | null>(null)
 
@@ -147,7 +147,10 @@ export function MaterialRow({ material }: MaterialRowProps) {
       <button
         type="button"
         onClick={handleStar}
-        disabled={mutation.isPending}
+        // While logged in, wait for the favorites query before allowing a toggle:
+        // before it resolves isFav is always false, so a click on an already-
+        // favorited item would mistakenly call addFavorite and get a 409.
+        disabled={mutation.isPending || (isLoggedIn && !favoritesLoaded)}
         aria-label={isFav ? '取消收藏' : '收藏'}
         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-accent disabled:opacity-50"
       >

@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import { LogIn } from 'lucide-react'
 import {
   Dialog,
@@ -23,6 +24,13 @@ export function LoginPromptDialog({
   onOpenChange,
   message = '登录后即可使用此功能',
 }: LoginPromptDialogProps) {
+  const pathname = usePathname()
+  // Send the user back to where they were after logging in. The query string
+  // is only available on window (client); fall back to the bare pathname in SSR.
+  const redirect = encodeURIComponent(
+    `${pathname ?? '/'}${typeof window !== 'undefined' ? window.location.search ?? '' : ''}`,
+  )
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-sm">
@@ -35,7 +43,7 @@ export function LoginPromptDialog({
         </DialogHeader>
         <DialogFooter className="flex-col gap-2 sm:flex-col">
           <Button className="w-full" asChild>
-            <Link href="/login">登录账号</Link>
+            <Link href={`/login?redirect=${redirect}`}>登录账号</Link>
           </Button>
           <Button variant="outline" className="w-full" asChild>
             <Link href="/register">免费注册</Link>

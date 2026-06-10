@@ -92,14 +92,29 @@ export function handle403(requestUrl: string): void {
 // dropping the ping is the correct UX.
 export const SILENT_401_PATHS = ['/view-events']
 
-export function shouldSilenceUnauthorized(requestUrl: string | undefined): boolean {
+// Endpoints whose 401s are handled by their own callers: AuthBootstrap's
+// getMe().catch clears auth (a guest hitting /auth/me is the normal case, not
+// a session expiry), and the login form surfaces the 401 as a form error. A
+// guest's refresh would fail anyway, so skip refresh + redirect for these too —
+// otherwise guests get an infinite full-page reload loop via /login.
+export const SELF_HANDLED_401_PATHS = ['/auth/me', '/auth/login']
+
+function matchesAnyPath(requestUrl: string | undefined, paths: string[]): boolean {
   if (!requestUrl) return false
   try {
     const parsed = new URL(requestUrl, apiClient.defaults.baseURL)
-    return SILENT_401_PATHS.some((path) => parsed.pathname === path || parsed.pathname.startsWith(`${path}/`))
+    return paths.some((path) => parsed.pathname === path || parsed.pathname.startsWith(`${path}/`))
   } catch {
-    return SILENT_401_PATHS.some((path) => requestUrl === path || requestUrl.startsWith(`${path}/`))
+    return paths.some((path) => requestUrl === path || requestUrl.startsWith(`${path}/`))
   }
+}
+
+export function shouldSilenceUnauthorized(requestUrl: string | undefined): boolean {
+  return matchesAnyPath(requestUrl, SILENT_401_PATHS)
+}
+
+export function isSelfHandled401(requestUrl: string | undefined): boolean {
+  return matchesAnyPath(requestUrl, SELF_HANDLED_401_PATHS)
 }
 
 export function isRefreshEndpoint(requestUrl: string | undefined): boolean {
@@ -146,7 +161,7 @@ export async function attemptTokenRefresh(): Promise<string | null> {
 function redirectToLogin(): void {
   if (typeof window !== 'undefined') {
     useAuthStore.getState().clearAuth()
-    const redirect = encodeURIComponent(window.location.pathname)
+    const redirect = encodeURIComponent(`${window.location.pathname}${window.location.search ?? ''}`)
     window.location.href = `/login?redirect=${redirect}`
   }
 }
@@ -163,6 +178,12 @@ apiClient.interceptors.response.use(
 
       // Silent paths (e.g. /view-events): drop quietly, no refresh attempt
       if (shouldSilenceUnauthorized(requestUrl)) {
+        return Promise.reject(error)
+      }
+
+      // /auth/me and /auth/login handle their own 401s — propagate to the
+      // caller without refreshing or redirecting (see SELF_HANDLED_401_PATHS)
+      if (isSelfHandled401(requestUrl)) {
         return Promise.reject(error)
       }
 

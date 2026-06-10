@@ -23,9 +23,11 @@ interface FilterBarProps {
   params: MaterialSearchParams
   onChange: (params: Partial<MaterialSearchParams>) => void
   onSearch: () => void
+  /** Clears every filter INCLUDING the keyword and commits immediately (onChange keeps `q` uncommitted until search). */
+  onReset: () => void
 }
 
-export function FilterBar({ params, onChange, onSearch }: FilterBarProps) {
+export function FilterBar({ params, onChange, onSearch, onReset }: FilterBarProps) {
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Enter') onSearch()
@@ -38,7 +40,7 @@ export function FilterBar({ params, onChange, onSearch }: FilterBarProps) {
   }
 
   const handleReset = () => {
-    onChange({ q: '', stage: undefined, subject: undefined, sort: undefined, page: 1 })
+    onReset()
   }
 
   const hasFilters = !!(params.q || params.stage || params.subject)

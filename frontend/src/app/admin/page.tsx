@@ -58,6 +58,17 @@ export default function AdminPage() {
     enabled: isAdmin,
   })
 
+  // After the last item on page N is reviewed, the refetched page comes back
+  // empty and the empty state hides the Pagination — clamp back to the last
+  // page that still has items so the admin isn't stranded.
+  useEffect(() => {
+    if (!data) return
+    if (data.items.length === 0 && page > 1) {
+      const lastPage = Math.max(1, Math.ceil(data.total / 10))
+      if (page > lastPage) setPage(lastPage)
+    }
+  }, [data, page])
+
   const invalidatePending = () => {
     void queryClient.invalidateQueries({ queryKey: ['admin', 'pending'] })
   }
