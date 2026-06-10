@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsEnum, IsString, Matches, ValidateIf } from 'class-validator';
+import { IsEmail, IsEnum, IsIn, IsString, Matches, ValidateIf } from 'class-validator';
 import { OtpPurpose } from '@prisma/client';
 
 export enum OtpChannelDto {
@@ -23,7 +23,9 @@ export class SendOtpDto {
   @IsEmail()
   email?: string;
 
-  @ApiProperty({ enum: OtpPurpose, example: OtpPurpose.LOGIN })
-  @IsEnum(OtpPurpose)
+  // RESET stays in the Prisma enum but is not accepted here: there is no redemption
+  // endpoint for it yet, so allowing it would mint codes that can never be used.
+  @ApiProperty({ enum: [OtpPurpose.REGISTER, OtpPurpose.LOGIN], example: OtpPurpose.LOGIN })
+  @IsIn([OtpPurpose.REGISTER, OtpPurpose.LOGIN])
   purpose!: OtpPurpose;
 }

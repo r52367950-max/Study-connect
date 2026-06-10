@@ -3,7 +3,7 @@
  *   - 50 popular middle-school records across 5 cities (10 each)
  *   - Pinyin first-letter index for autocomplete prefix search
  *
- * Run via:  pnpm prisma db seed   (or)   ts-node prisma/seed.ts
+ * Run via:  npm run prisma:migrate  then  npx prisma db seed   (or)   ts-node prisma/seed.ts
  *
  * Sample materials are intentionally omitted here: stage-3 frontend will
  * upload through the real /materials API path so file storage + scanning

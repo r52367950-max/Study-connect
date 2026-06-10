@@ -2,6 +2,7 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '../auth/decorators/public.decorator';
 import { RateLimit } from '../../common/rate-limit.decorator';
+import { SuggestQueryDto } from './dto/suggest-query.dto';
 import { SearchService } from './search.service';
 
 @ApiTags('search')
@@ -13,7 +14,7 @@ export class SearchController {
   @Public()
   @RateLimit({ name: 'search-suggest', limit: 60, windowMs: 60_000 })
   @ApiOperation({ summary: 'Search suggestions backed by pg_trgm similarity' })
-  suggest(@Query('q') q = '', @Query('limit') limit = '10') {
-    return this.searchService.suggest(q, Number(limit));
+  suggest(@Query() query: SuggestQueryDto) {
+    return this.searchService.suggest(query.q ?? '', query.limit ?? 10);
   }
 }

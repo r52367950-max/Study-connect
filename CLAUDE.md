@@ -45,7 +45,7 @@ security-hardening passes — security work in this repo has a formal gate (see 
 │       ├── reviews/, downloads/, search/  # currently thin/placeholder modules
 ├── prisma/
 │   ├── schema.prisma           # DB schema (PostgreSQL). Migrations dir is git-ignored.
-│   └── seed.ts                 # `prisma db seed` (configured in package.json "prisma.seed")
+│   └── seed.ts                 # `prisma db seed` — schools only; sample materials intentionally not seeded (use the real upload path)
 ├── scripts/                    # `min-*` validation scripts + min-all-runner.cjs (see Testing)
 ├── docs/                       # error-code-spec, rate-limit-rules, security-gate-policy, backend dev guide
 ├── .github/workflows/          # security-gate.yml, frontend-quality-gate.yml
