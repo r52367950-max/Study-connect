@@ -1,8 +1,7 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { Star, Download } from 'lucide-react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { MaterialRowItem } from '@/types'
@@ -13,6 +12,7 @@ import { useAuth } from '@/hooks/use-auth'
 import { useFavorites } from '@/hooks/use-favorites'
 import { SubjectIcon } from '@/components/study/subject-icon'
 import { KindTag } from '@/components/materials/kind-tag'
+import { LoginPromptDialog } from '@/components/shared/login-prompt-dialog'
 import { toast } from '@/components/ui/use-toast'
 import { cn, formatScore } from '@/lib/utils'
 
@@ -32,10 +32,10 @@ export function resetReportedViewIds(): void {
 }
 
 export function MaterialRow({ material }: MaterialRowProps) {
-  const router = useRouter()
   const queryClient = useQueryClient()
   const { isLoggedIn } = useAuth()
-  const { favoriteIds } = useFavorites()
+  const [loginPromptOpen, setLoginPromptOpen] = useState(false)
+  const { favoriteIds, isSuccess: favoritesLoaded } = useFavorites()
   const isFav = favoriteIds.has(material.id)
   const rowRef = useRef<HTMLDivElement | null>(null)
 
@@ -74,20 +74,39 @@ export function MaterialRow({ material }: MaterialRowProps) {
 
   const mutation = useMutation({
     mutationFn: () => (isFav ? removeFavorite(material.id) : addFavorite(material.id)),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['favorites'] })
-      queryClient.invalidateQueries({ queryKey: ['materials'] })
-      queryClient.invalidateQueries({ queryKey: ['recommendations'] })
+    // Optimistic update: flip the star immediately without waiting for the RTT.
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['favorites'] })
+      const prev = queryClient.getQueryData<ReturnType<typeof Array>>(['favorites'])
+      queryClient.setQueryData<MaterialRowItem[] | undefined>(['favorites'], (old) => {
+        if (!old) return old
+        if (isFav) return old.filter((m: MaterialRowItem) => m.id !== material.id)
+        return [...old, material]
+      })
+      return { prev }
     },
-    onError: (err) =>
-      toast({ variant: 'destructive', title: '操作失败', description: getErrorMessage(err) }),
+    onError: (err, _vars, ctx) => {
+      // Roll back to the snapshot on error
+      if (ctx?.prev !== undefined) {
+        queryClient.setQueryData(['favorites'], ctx.prev)
+      }
+      toast({ variant: 'destructive', title: '操作失败', description: getErrorMessage(err) })
+    },
+    onSettled: () => {
+      // Always re-sync from server to reconcile with other tabs / race conditions
+      void queryClient.invalidateQueries({ queryKey: ['favorites'] })
+      void queryClient.invalidateQueries({ queryKey: ['materials'] })
+      void queryClient.invalidateQueries({ queryKey: ['recommendations'] })
+      // Also invalidate the detail-page cache so the star stays consistent there
+      void queryClient.invalidateQueries({ queryKey: ['material', material.id] })
+    },
   })
 
   const handleStar = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
     if (!isLoggedIn) {
-      router.push(`/login?redirect=${encodeURIComponent(window.location.pathname)}`)
+      setLoginPromptOpen(true)
       return
     }
     mutation.mutate()
@@ -128,7 +147,10 @@ export function MaterialRow({ material }: MaterialRowProps) {
       <button
         type="button"
         onClick={handleStar}
-        disabled={mutation.isPending}
+        // While logged in, wait for the favorites query before allowing a toggle:
+        // before it resolves isFav is always false, so a click on an already-
+        // favorited item would mistakenly call addFavorite and get a 409.
+        disabled={mutation.isPending || (isLoggedIn && !favoritesLoaded)}
         aria-label={isFav ? '取消收藏' : '收藏'}
         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-accent disabled:opacity-50"
       >
@@ -139,6 +161,11 @@ export function MaterialRow({ material }: MaterialRowProps) {
           )}
         />
       </button>
+      <LoginPromptDialog
+        open={loginPromptOpen}
+        onOpenChange={setLoginPromptOpen}
+        message="登录后即可收藏资料"
+      />
     </div>
   )
 }

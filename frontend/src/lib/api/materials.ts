@@ -29,7 +29,10 @@ export async function getMaterial(id: string): Promise<Material> {
 
 // ─── Upload ───────────────────────────────────────────────────────────────────
 
-export async function uploadMaterial(payload: UploadMaterialPayload): Promise<Material> {
+export async function uploadMaterial(
+  payload: UploadMaterialPayload,
+  onUploadProgress?: (percent: number) => void,
+): Promise<Material> {
   const form = new FormData()
   form.append('title', payload.title)
   if (payload.description) form.append('description', payload.description)
@@ -43,6 +46,13 @@ export async function uploadMaterial(payload: UploadMaterialPayload): Promise<Ma
 
   const { data } = await apiClient.post<Material>('/materials', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    ...(onUploadProgress && {
+      onUploadProgress: (event) => {
+        if (event.total) {
+          onUploadProgress(Math.round((event.loaded / event.total) * 100))
+        }
+      },
+    }),
   })
   return data
 }

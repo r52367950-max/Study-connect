@@ -12,9 +12,7 @@ import {
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import type { MaterialSearchParams, MaterialSort } from '@/types'
-
-const STAGE_OPTIONS = ['小学', '初中', '高中', '大学', '职教']
-const SUBJECT_OPTIONS = ['语文', '数学', '英语', '物理', '化学', '生物', '历史', '地理', '政治', '信息技术']
+import { STAGES, SUBJECTS } from '@/components/onboarding/constants'
 const SORT_OPTIONS: { value: MaterialSort; label: string }[] = [
   { value: 'latest', label: '最新发布' },
   { value: 'downloads', label: '下载最多' },
@@ -25,9 +23,11 @@ interface FilterBarProps {
   params: MaterialSearchParams
   onChange: (params: Partial<MaterialSearchParams>) => void
   onSearch: () => void
+  /** Clears every filter INCLUDING the keyword and commits immediately (onChange keeps `q` uncommitted until search). */
+  onReset: () => void
 }
 
-export function FilterBar({ params, onChange, onSearch }: FilterBarProps) {
+export function FilterBar({ params, onChange, onSearch, onReset }: FilterBarProps) {
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Enter') onSearch()
@@ -40,7 +40,7 @@ export function FilterBar({ params, onChange, onSearch }: FilterBarProps) {
   }
 
   const handleReset = () => {
-    onChange({ q: '', stage: undefined, subject: undefined, sort: undefined, page: 1 })
+    onReset()
   }
 
   const hasFilters = !!(params.q || params.stage || params.subject)
@@ -77,7 +77,7 @@ export function FilterBar({ params, onChange, onSearch }: FilterBarProps) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="__all__">全部学段</SelectItem>
-            {STAGE_OPTIONS.map((s) => (
+            {STAGES.map((s) => (
               <SelectItem key={s} value={s}>{s}</SelectItem>
             ))}
           </SelectContent>
@@ -92,7 +92,7 @@ export function FilterBar({ params, onChange, onSearch }: FilterBarProps) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="__all__">全部学科</SelectItem>
-            {SUBJECT_OPTIONS.map((s) => (
+            {SUBJECTS.map((s) => (
               <SelectItem key={s} value={s}>{s}</SelectItem>
             ))}
           </SelectContent>

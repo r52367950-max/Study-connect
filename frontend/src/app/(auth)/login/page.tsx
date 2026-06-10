@@ -145,6 +145,21 @@ function LoginPageContent() {
     sendOtpMutation.reset()
   }
 
+  // Clear the opposite field when switching login mode so stale input can't
+  // bleed through and confuse validation on the newly-shown field.
+  const switchMode = (next: CredentialMode) => {
+    setMode(next)
+    if (next === 'otp') {
+      setPassword('')
+    } else {
+      setOtpCode('')
+      countdown.reset()
+      sendOtpMutation.reset()
+      setOtpNotice(null)
+    }
+    setFormError(null)
+  }
+
   return (
     <div className="flex min-h-[calc(100vh-10rem)] items-center justify-center">
       <div className="w-full max-w-sm space-y-6">
@@ -180,7 +195,7 @@ function LoginPageContent() {
           <div className="flex gap-1 text-xs">
             <button
               type="button"
-              onClick={() => setMode('password')}
+              onClick={() => switchMode('password')}
               className={mode === 'password' ? 'font-medium text-foreground' : 'text-muted-foreground'}
             >
               密码登录
@@ -188,7 +203,7 @@ function LoginPageContent() {
             <span className="text-muted-foreground">·</span>
             <button
               type="button"
-              onClick={() => setMode('otp')}
+              onClick={() => switchMode('otp')}
               className={mode === 'otp' ? 'font-medium text-foreground' : 'text-muted-foreground'}
             >
               验证码登录

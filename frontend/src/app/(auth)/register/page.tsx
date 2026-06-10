@@ -22,10 +22,6 @@ export default function RegisterPage() {
   const router = useRouter()
   const { isLoggedIn, setAuth } = useAuth()
 
-  useEffect(() => {
-    if (isLoggedIn) router.replace('/')
-  }, [isLoggedIn, router])
-
   const [idKind, setIdKind] = useState<IdentifierKind>('email')
   const [identifier, setIdentifier] = useState('')
   const [username, setUsername] = useState('')
@@ -60,6 +56,14 @@ export default function RegisterPage() {
     },
     onError: (err) => setFormError(getErrorMessage(err)),
   })
+
+  // "Already logged in" → bounce to home. Skip while a registration is in flight
+  // or just succeeded to avoid stomping the onSuccess→/onboarding redirect.
+  useEffect(() => {
+    if (!isLoggedIn) return
+    if (registerMutation.isPending || registerMutation.isSuccess) return
+    router.replace('/')
+  }, [isLoggedIn, router, registerMutation.isPending, registerMutation.isSuccess])
 
   const handleSendOtp = () => {
     if (!identifierValid) {

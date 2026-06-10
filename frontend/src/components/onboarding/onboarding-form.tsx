@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { AxiosError } from 'axios'
 import { updateMyProfile } from '@/lib/api/users'
 import { getErrorMessage } from '@/lib/api/client'
 import type { Profile, ProfileRole, SchoolSummary, UpdateProfilePayload } from '@/types'
@@ -55,19 +56,41 @@ function toggle<T>(list: T[], value: T): T[] {
   return list.includes(value) ? list.filter((x) => x !== value) : [...list, value]
 }
 
+// Extract 422 message strings as an array for per-field display, or fall back
+// to getErrorMessage for non-422 errors.
+function extract422Messages(err: unknown): string[] {
+  if (err instanceof AxiosError && err.response?.status === 422) {
+    const data = err.response.data as { message?: string | string[] } | undefined
+    if (Array.isArray(data?.message)) return data.message
+    if (typeof data?.message === 'string') return [data.message]
+  }
+  return [getErrorMessage(err)]
+}
+
 export function OnboardingForm({ initialValue, editing = false, onSaved }: OnboardingFormProps) {
   const [draft, setDraft] = useState<Draft>(() => toDraft(initialValue))
   const [step, setStep] = useState<1 | 2>(1)
   const [formError, setFormError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<string[]>([])
   const queryClient = useQueryClient()
 
   const mutation = useMutation({
     mutationFn: (payload: UpdateProfilePayload) => updateMyProfile(payload),
     onSuccess: (profile) => {
+      setFieldErrors([])
       queryClient.setQueryData(['profile'], profile)
       onSaved?.(profile)
     },
-    onError: (err) => setFormError(getErrorMessage(err)),
+    onError: (err) => {
+      const msgs = extract422Messages(err)
+      if (msgs.length > 1) {
+        setFieldErrors(msgs)
+        setFormError(null)
+      } else {
+        setFieldErrors([])
+        setFormError(msgs[0] ?? getErrorMessage(err))
+      }
+    },
   })
 
   // Drop grades that aren't valid under the currently selected stages.
@@ -82,8 +105,13 @@ export function OnboardingForm({ initialValue, editing = false, onSaved }: Onboa
     return null
   }
   const validateStep2 = (): string | null => {
-    if (!draft.city.trim() && !draft.school && !draft.schoolNameFreeText.trim()) {
-      return '请填写城市或选择学校'
+    // Mirrors the backend completion rule (profileRole && displayName && (city || schoolId)):
+    // a free-text school name alone never satisfies it, so require the city in that mode —
+    // otherwise onboardedAt is never set and OnboardingGate loops back here forever.
+    if (!draft.school && !draft.city.trim()) {
+      return draft.schoolNameFreeText.trim()
+        ? '手动填写学校时请同时填写所在城市'
+        : '请填写城市或选择学校'
     }
     if (draft.stages.length === 0) return '请至少选择一个学段'
     if (draft.subjects.length === 0) return '请至少选择一个学科'
@@ -94,7 +122,10 @@ export function OnboardingForm({ initialValue, editing = false, onSaved }: Onboa
     profileRole: draft.profileRole ?? undefined,
     displayName: draft.displayName.trim() || undefined,
     city: draft.city.trim() || undefined,
-    schoolId: draft.school ? draft.school.id : draft.schoolNameFreeText ? null : undefined,
+    // In free-text mode schoolId must be OMITTED (not null): the backend gives an
+    // explicit schoolId (including null) precedence over schoolNameFreeText, so
+    // sending null would silently discard the hand-typed school name.
+    schoolId: draft.school ? draft.school.id : undefined,
     schoolNameFreeText: draft.schoolNameFreeText.trim() || (draft.school ? null : undefined),
     stages: draft.stages,
     grades: filteredGrades,
@@ -279,6 +310,11 @@ export function OnboardingForm({ initialValue, editing = false, onSaved }: Onboa
         {formError && (
           <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{formError}</div>
         )}
+        {fieldErrors.length > 0 && (
+          <ul className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive space-y-0.5 list-disc list-inside">
+            {fieldErrors.map((msg, i) => <li key={i}>{msg}</li>)}
+          </ul>
+        )}
         <Button onClick={handleSave} disabled={mutation.isPending} className="w-full">
           {mutation.isPending ? '保存中…' : '保存'}
         </Button>
@@ -297,6 +333,11 @@ export function OnboardingForm({ initialValue, editing = false, onSaved }: Onboa
 
       {formError && (
         <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{formError}</div>
+      )}
+      {fieldErrors.length > 0 && (
+        <ul className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive space-y-0.5 list-disc list-inside">
+          {fieldErrors.map((msg, i) => <li key={i}>{msg}</li>)}
+        </ul>
       )}
 
       <div className="flex justify-between gap-3">

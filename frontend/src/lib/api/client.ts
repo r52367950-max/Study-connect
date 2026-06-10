@@ -1,4 +1,4 @@
-import axios, { AxiosError } from 'axios'
+import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import { useAuthStore } from '@/lib/auth-store'
 
 export const apiClient = axios.create({
@@ -86,35 +86,136 @@ export function handle403(requestUrl: string): void {
   // Non-admin 403: let getErrorMessage('无访问权限') surface in the component
 }
 
-// Endpoints whose 401s must NOT trigger the global "clear auth + redirect to
-// /login" flow. These run in the background (impression / view-event pings)
-// where a stale access cookie is expected and silently dropping the ping is
-// the correct UX — otherwise scrolling a list after the 15-min access cookie
-// expires would "ghost-logout" the user mid-browse.
-const SILENT_401_PATHS = ['/view-events']
+// Endpoints whose 401s must NOT trigger the global refresh or "clear auth +
+// redirect to /login" flow. These run in the background (impression /
+// view-event pings) where a stale access cookie is expected and silently
+// dropping the ping is the correct UX.
+export const SILENT_401_PATHS = ['/view-events']
 
-function shouldSilenceUnauthorized(requestUrl: string | undefined): boolean {
+// Endpoints whose 401s are handled by their own callers: AuthBootstrap's
+// getMe().catch clears auth (a guest hitting /auth/me is the normal case, not
+// a session expiry), and the login form surfaces the 401 as a form error. A
+// guest's refresh would fail anyway, so skip refresh + redirect for these too —
+// otherwise guests get an infinite full-page reload loop via /login.
+export const SELF_HANDLED_401_PATHS = ['/auth/me', '/auth/login']
+
+function matchesAnyPath(requestUrl: string | undefined, paths: string[]): boolean {
   if (!requestUrl) return false
   try {
     const parsed = new URL(requestUrl, apiClient.defaults.baseURL)
-    return SILENT_401_PATHS.some((path) => parsed.pathname === path || parsed.pathname.startsWith(`${path}/`))
+    return paths.some((path) => parsed.pathname === path || parsed.pathname.startsWith(`${path}/`))
   } catch {
-    return SILENT_401_PATHS.some((path) => requestUrl === path || requestUrl.startsWith(`${path}/`))
+    return paths.some((path) => requestUrl === path || requestUrl.startsWith(`${path}/`))
+  }
+}
+
+export function shouldSilenceUnauthorized(requestUrl: string | undefined): boolean {
+  return matchesAnyPath(requestUrl, SILENT_401_PATHS)
+}
+
+export function isSelfHandled401(requestUrl: string | undefined): boolean {
+  return matchesAnyPath(requestUrl, SELF_HANDLED_401_PATHS)
+}
+
+export function isRefreshEndpoint(requestUrl: string | undefined): boolean {
+  if (!requestUrl) return false
+  try {
+    const parsed = new URL(requestUrl, apiClient.defaults.baseURL)
+    return parsed.pathname === '/auth/refresh'
+  } catch {
+    return requestUrl === '/auth/refresh'
+  }
+}
+
+// ─── Token refresh single-flight ─────────────────────────────────────────────
+// Shared across all concurrent 401s so we only call POST /auth/refresh once.
+// Exported for testing purposes only (read-only snapshot — use attemptTokenRefresh).
+export let refreshPromise: Promise<string | null> | null = null
+
+export async function attemptTokenRefresh(): Promise<string | null> {
+  if (!refreshPromise) {
+    refreshPromise = apiClient
+      .post<{ success: true; accessToken: string }>('/auth/refresh')
+      .then((res) => {
+        const newToken = res.data.accessToken ?? null
+        if (newToken) {
+          const currentUser = useAuthStore.getState().user
+          if (currentUser) {
+            useAuthStore.getState().setAuth(currentUser, newToken)
+          }
+        }
+        return newToken
+      })
+      .catch((err: unknown) => {
+        // Re-throw so callers know the refresh failed
+        refreshPromise = null
+        throw err
+      })
+      .finally(() => {
+        refreshPromise = null
+      })
+  }
+  return refreshPromise
+}
+
+function redirectToLogin(): void {
+  if (typeof window !== 'undefined') {
+    useAuthStore.getState().clearAuth()
+    const redirect = encodeURIComponent(`${window.location.pathname}${window.location.search ?? ''}`)
+    window.location.href = `/login?redirect=${redirect}`
   }
 }
 
 // ─── Response: handle common error codes ─────────────────────────────────────
 apiClient.interceptors.response.use(
   (response) => response,
-  (error: AxiosError) => {
+  async (error: AxiosError) => {
     const status = error.response?.status
+    const config = error.config as (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined
 
-    if (status === 401 && !shouldSilenceUnauthorized(error.config?.url)) {
-      // Clear in-memory auth state and redirect to login
-      if (typeof window !== 'undefined') {
-        useAuthStore.getState().clearAuth()
-        const redirect = encodeURIComponent(window.location.pathname)
-        window.location.href = `/login?redirect=${redirect}`
+    if (status === 401) {
+      const requestUrl = config?.url
+
+      // Silent paths (e.g. /view-events): drop quietly, no refresh attempt
+      if (shouldSilenceUnauthorized(requestUrl)) {
+        return Promise.reject(error)
+      }
+
+      // /auth/me and /auth/login handle their own 401s — propagate to the
+      // caller without refreshing or redirecting (see SELF_HANDLED_401_PATHS)
+      if (isSelfHandled401(requestUrl)) {
+        return Promise.reject(error)
+      }
+
+      // The refresh endpoint itself failed → hard logout (avoid infinite loop)
+      if (isRefreshEndpoint(requestUrl)) {
+        redirectToLogin()
+        return Promise.reject(error)
+      }
+
+      // Already retried once → hard logout
+      if (config?._retry) {
+        redirectToLogin()
+        return Promise.reject(error)
+      }
+
+      // First 401 on a non-silent, non-refresh request → attempt single-flight refresh
+      try {
+        await attemptTokenRefresh()
+      } catch {
+        redirectToLogin()
+        return Promise.reject(error)
+      }
+
+      // Refresh succeeded — replay the original request once (mark _retry)
+      if (config) {
+        config._retry = true
+        // Re-attach updated Bearer token for the retry
+        const newToken = useAuthStore.getState().accessToken
+        if (newToken && typeof config.headers?.set === 'function') {
+          config.headers.set('Authorization', `Bearer ${newToken}`)
+        }
+        return apiClient.request(config)
       }
     }
 

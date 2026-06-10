@@ -31,7 +31,7 @@ import { ErrorState } from '@/components/shared/error-state'
 import { toast } from '@/components/ui/use-toast'
 import { formatRelativeTime } from '@/lib/utils'
 
-type ActionType = 'reject' | 'offline' | null
+type ActionType = 'approve' | 'reject' | 'offline' | null
 
 export default function AdminPage() {
   const router = useRouter()
@@ -58,25 +58,61 @@ export default function AdminPage() {
     enabled: isAdmin,
   })
 
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ['admin', 'pending'] })
+  // After the last item on page N is reviewed, the refetched page comes back
+  // empty and the empty state hides the Pagination — clamp back to the last
+  // page that still has items so the admin isn't stranded.
+  useEffect(() => {
+    if (!data) return
+    if (data.items.length === 0 && page > 1) {
+      const lastPage = Math.max(1, Math.ceil(data.total / 10))
+      if (page > lastPage) setPage(lastPage)
+    }
+  }, [data, page])
+
+  const invalidatePending = () => {
+    void queryClient.invalidateQueries({ queryKey: ['admin', 'pending'] })
+  }
+
+  // Invalidate public caches so approved/rejected/offline materials appear or
+  // disappear for all users within the current staleTime window.
+  const invalidatePublic = (materialId?: string) => {
+    void queryClient.invalidateQueries({ queryKey: ['materials'] })
+    void queryClient.invalidateQueries({ queryKey: ['recommendations'] })
+    if (materialId) {
+      void queryClient.invalidateQueries({ queryKey: ['material', materialId] })
+    }
   }
 
   const approveMut = useMutation({
     mutationFn: approveMaterial,
-    onSuccess: () => { toast({ title: '已通过审核' }); invalidate() },
+    onSuccess: (_data, id) => {
+      toast({ title: '已通过审核' })
+      invalidatePending()
+      invalidatePublic(id)
+      closeDialog()
+    },
     onError: (err) => toast({ variant: 'destructive', title: '操作失败', description: getErrorMessage(err) }),
   })
 
   const rejectMut = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) => rejectMaterial(id, reason),
-    onSuccess: () => { toast({ title: '已驳回' }); invalidate(); closeDialog() },
+    onSuccess: (_data, { id }) => {
+      toast({ title: '已驳回' })
+      invalidatePending()
+      invalidatePublic(id)
+      closeDialog()
+    },
     onError: (err) => toast({ variant: 'destructive', title: '操作失败', description: getErrorMessage(err) }),
   })
 
   const offlineMut = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) => offlineMaterial(id, reason),
-    onSuccess: () => { toast({ title: '已下线' }); invalidate(); closeDialog() },
+    onSuccess: (_data, { id }) => {
+      toast({ title: '已下线' })
+      invalidatePending()
+      invalidatePublic(id)
+      closeDialog()
+    },
     onError: (err) => toast({ variant: 'destructive', title: '操作失败', description: getErrorMessage(err) }),
   })
 
@@ -89,6 +125,7 @@ export default function AdminPage() {
 
   const handleDialogConfirm = () => {
     if (!actionTarget) return
+    if (actionType === 'approve') approveMut.mutate(actionTarget)
     if (actionType === 'reject') rejectMut.mutate({ id: actionTarget, reason })
     if (actionType === 'offline') offlineMut.mutate({ id: actionTarget, reason })
   }
@@ -147,7 +184,7 @@ export default function AdminPage() {
                   variant="outline"
                   className="h-8 border-green-200 text-green-700 hover:bg-green-50 hover:text-green-800"
                   disabled={approveMut.isPending}
-                  onClick={() => approveMut.mutate(item.id)}
+                  onClick={() => openDialog(item.id, 'approve')}
                 >
                   <Check className="mr-1.5 h-3.5 w-3.5" />
                   通过
@@ -194,41 +231,48 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* Reject / Offline dialog */}
+      {/* Approve / Reject / Offline dialog */}
       <Dialog open={!!actionTarget} onOpenChange={(open) => !open && closeDialog()}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{actionType === 'reject' ? '驳回资料' : '下线资料'}</DialogTitle>
+            <DialogTitle>
+              {actionType === 'approve' ? '确认通过审核' : actionType === 'reject' ? '驳回资料' : '下线资料'}
+            </DialogTitle>
             <DialogDescription>
-              {actionType === 'reject'
-                ? '请填写驳回原因，将通知上传者'
-                : '请填写下线原因（选填）'}
+              {actionType === 'approve'
+                ? '通过后资料将对所有用户公开，请确认内容合规。'
+                : actionType === 'reject'
+                  ? '请填写驳回原因，将通知上传者'
+                  : '请填写下线原因（选填）'}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-1.5">
-            <Label htmlFor="reason">
-              原因{actionType === 'reject' ? ' *' : '（选填）'}
-            </Label>
-            <Textarea
-              id="reason"
-              placeholder={actionType === 'reject' ? '请说明不符合规范的原因…' : '可选填下线原因…'}
-              rows={3}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          </div>
+          {actionType !== 'approve' && (
+            <div className="space-y-1.5">
+              <Label htmlFor="reason">
+                原因{actionType === 'reject' ? ' *' : '（选填）'}
+              </Label>
+              <Textarea
+                id="reason"
+                placeholder={actionType === 'reject' ? '请说明不符合规范的原因…' : '可选填下线原因…'}
+                rows={3}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+              />
+            </div>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={closeDialog}>取消</Button>
             <Button
-              variant="destructive"
+              variant={actionType === 'approve' ? 'default' : 'destructive'}
               disabled={
                 (actionType === 'reject' && !reason.trim()) ||
+                approveMut.isPending ||
                 rejectMut.isPending ||
                 offlineMut.isPending
               }
               onClick={handleDialogConfirm}
             >
-              确认{actionType === 'reject' ? '驳回' : '下线'}
+              {actionType === 'approve' ? '确认通过' : actionType === 'reject' ? '确认驳回' : '确认下线'}
             </Button>
           </DialogFooter>
         </DialogContent>

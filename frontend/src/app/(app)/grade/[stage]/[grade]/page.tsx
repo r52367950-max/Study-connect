@@ -9,7 +9,8 @@ export default function PageGrade({
 }: {
   params: { stage: string; grade: string }
 }) {
-  const { stage, grade } = params
+  const stage = decodeURIComponent(params.stage)
+  const grade = decodeURIComponent(params.grade)
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">

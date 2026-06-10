@@ -19,8 +19,6 @@ import {
 import { useAuth } from '@/hooks/use-auth'
 import { useProfile } from '@/hooks/use-profile'
 import { useFavorites } from '@/hooks/use-favorites'
-import { logout as logoutApi } from '@/lib/api/auth'
-import { useAuthStore } from '@/lib/auth-store'
 import { useCommandPaletteStore } from '@/lib/command-palette-store'
 import { useSidebarStore } from '@/lib/sidebar-store'
 import { SUBJECTS, STAGES, GRADES_BY_STAGE } from '@/components/onboarding/constants'
@@ -58,7 +56,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       return pathname
     }
   })()
-  const { isLoggedIn, user } = useAuth()
+  const { isLoggedIn, user, logout } = useAuth()
   const { data: profile } = useProfile()
   const { data: favorites } = useFavorites()
   const setCommandOpen = useCommandPaletteStore((s) => s.setOpen)
@@ -100,19 +98,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     )
   }
 
-  // Reuse the existing logout endpoint (bumps tokenVersion + clears cookies),
-  // then clear local auth and redirect. Always redirect even if the request
-  // fails, so a network hiccup can't strand the user in a logged-in shell.
-  const handleLogout = async () => {
+  const handleLogout = () => {
     onNavigate?.()
-    try {
-      await logoutApi()
-    } catch {
-      // ignore — fall through to clear local state and redirect
-    } finally {
-      useAuthStore.getState().clearAuth()
-      router.replace('/login')
-    }
+    logout()
   }
 
   return (

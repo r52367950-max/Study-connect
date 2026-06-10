@@ -72,7 +72,7 @@ export default function MaterialsPage() {
       </div>
 
       {/* Filters */}
-      <FilterBar params={params} onChange={handleParamsChange} onSearch={handleSearch} />
+      <FilterBar params={params} onChange={handleParamsChange} onSearch={handleSearch} onReset={handleResetFilters} />
 
       {/* Results */}
       <ContentTransition isLoading={isLoading} skeleton={<MaterialCardGridSkeleton />}>
