@@ -113,6 +113,9 @@ export class AuthService {
     if (!dto.email && !dto.phone) {
       throw new UnprocessableEntityException('Email or phone is required');
     }
+    if (dto.email && dto.phone) {
+      throw new UnprocessableEntityException('Provide either email or phone, not both');
+    }
     if (!dto.password && !dto.otpCode) {
       throw new UnprocessableEntityException('Password or OTP code is required');
     }

@@ -140,7 +140,26 @@ export class MaterialsService {
         ORDER BY (similarity(m.title, ${q}) + similarity(COALESCE(m.description, ''), ${q})) DESC, m.created_at DESC
         LIMIT ${pageSize} OFFSET ${skip}
       `);
-      const total = rows[0] ? Number(rows[0].totalCount) : 0;
+      // COUNT(*) OVER() only yields a value on non-empty pages. For an out-of-range
+      // OFFSET (skip > 0 with no rows) fall back to a dedicated count so pagination metadata
+      // stays correct instead of collapsing to total: 0 while earlier pages have matches.
+      let total = rows[0] ? Number(rows[0].totalCount) : 0;
+      if (rows.length === 0 && skip > 0) {
+        const countRows = await this.prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`
+          SELECT COUNT(*)::bigint AS total
+          FROM materials m
+          WHERE m.status = 'APPROVED'
+            AND m.visibility = 'PUBLIC'
+            AND (m.file_safety_status = 'PASSED' OR m.file_safety_status IS NULL)
+            AND (${query.subject ?? null}::text IS NULL OR LOWER(m.subject) = LOWER(${query.subject ?? null}))
+            AND (${query.stage ?? null}::text IS NULL OR LOWER(m.stage) = LOWER(${query.stage ?? null}))
+            AND (${query.grade ?? null}::text IS NULL OR LOWER(m.grade) = LOWER(${query.grade ?? null}))
+            AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
+            AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
+            AND (similarity(m.title, ${q}) > 0 OR similarity(COALESCE(m.description, ''), ${q}) > 0)
+        `);
+        total = countRows[0] ? Number(countRows[0].total) : 0;
+      }
       const materialIds = rows.map((item) => item.id);
       const averages = materialIds.length
         ? await this.prisma.rating.groupBy({ by: ['materialId'], where: { materialId: { in: materialIds } }, _avg: { score: true } })
@@ -361,7 +380,7 @@ export class MaterialsService {
   async upsertMaterialRating(params: { materialId: string; userId: string; dto: CreateRatingDto }) {
     await this.ensurePublicApprovedMaterial(params.materialId);
 
-    const rating = await this.prisma.rating.upsert({
+    const upsertArgs = {
       where: {
         userId_materialId: {
           userId: params.userId,
@@ -387,7 +406,20 @@ export class MaterialsService {
         createdAt: true,
         updatedAt: true,
       },
-    });
+    } satisfies Prisma.RatingUpsertArgs;
+
+    let rating;
+    try {
+      rating = await this.prisma.rating.upsert(upsertArgs);
+    } catch (err) {
+      // Two concurrent first ratings can both take the `create` path; the loser hits the
+      // unique constraint (P2002). Retry once — the row exists now, so upsert updates.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        rating = await this.prisma.rating.upsert(upsertArgs);
+      } else {
+        throw err;
+      }
+    }
 
     const aggregate = await this.prisma.rating.aggregate({
       where: { materialId: params.materialId },
@@ -480,28 +512,6 @@ export class MaterialsService {
     };
   }
 
-
-  private async ensureApprovedMaterial<TSelect extends Prisma.MaterialSelect>(
-    materialId: string,
-    options?: { select?: TSelect },
-  ): Promise<Prisma.MaterialGetPayload<{ select: TSelect }>> {
-    const select = (options?.select ?? ({ id: true } as TSelect)) as TSelect;
-
-    const material = await this.prisma.material.findFirst({
-      where: {
-        id: materialId,
-        status: MaterialStatus.APPROVED,
-        fileSafetyStatus: FileSafetyStatus.PASSED,
-      },
-      select,
-    });
-
-    if (!material) {
-      throw new NotFoundException('Material not found or not approved');
-    }
-
-    return material as Prisma.MaterialGetPayload<{ select: TSelect }>;
-  }
 
   private async ensurePublicApprovedMaterial<TSelect extends Prisma.MaterialSelect>(
     materialId: string,

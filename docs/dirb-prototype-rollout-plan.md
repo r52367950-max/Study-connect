@@ -33,7 +33,7 @@
 4. **当前没有 Redis**。OTP 用 `OtpAttempt` 表 + HMAC-SHA256(`OTP_SECRET`，回落 `JWT_SECRET`) + `timingSafeEqual`；OTP 校验次数桶 + 限流 + 登录失败锁都是**内存**实现（`RateLimitService`）。"OTP 存 Redis""BullMQ + Redis"是工作流 P 的待引入项，不是已有设施。
 5. **短信服务商是阿里云 SMS**（`ALIYUN_SMS_*`，见 `.env.example`），不是腾讯云。Provider 选择策略：凭据齐全用 `AliyunSmsProvider` / `SmtpMailProvider`，否则回落 `ConsoleSmsProvider` / `ConsoleMailProvider`；"配了凭据但没装 SDK" 现在是 **fail-loud（throw）**，不是静默 no-op。`@alicloud/dysmsapi20170525` / `@alicloud/openapi-client` / `nodemailer` 是按需 `require` 的可选依赖，不在 `package.json`/lockfile —— 生产装它们需单独 audit + 锁版本。
 6. **OTP 用途隔离**：`purpose: REGISTER | LOGIN | RESET`，验证码不可跨用途复用。
-7. **阶段 1 已经实现并合并的接口/模块**（后续阶段不要重复造）：`/auth/otp/send`、`/auth/otp/verify`、`/auth/login`（邮箱+手机双标识）、`/auth/register`、`GET|PUT /users/me/profile`、`GET /schools`、`GET|POST|DELETE /favorites`、`GET /materials/recommend`、`POST /view-events`、`src/modules/materials/recommendations.service.ts`（含 `getColleagueSignals` K-匿名 `HAVING COUNT(DISTINCT) >= 3`）、`prisma/seed.ts`（学校 + 样本资料）。
+7. **阶段 1 已经实现并合并的接口/模块**（后续阶段不要重复造）：`/auth/otp/send`、`/auth/otp/verify`、`/auth/login`（邮箱+手机双标识）、`/auth/register`、`GET|PUT /users/me/profile`、`GET /schools`、`GET|POST|DELETE /favorites`、`GET /materials/recommend`、`POST /view-events`、`src/modules/materials/recommendations.service.ts`（含 `getColleagueSignals` K-匿名 `HAVING COUNT(DISTINCT) >= 3`）、`prisma/seed.ts`（仅学校；样本资料有意不种，走真实上传路径）。
 8. 推荐算法的"内容匹配"打分（subject/grade/stage/city/kind）**已实现**，它本身就是冷启动的正确核心；后续是在它之上做行为信号 + 协同（见工作流 P §P3）。
 
 ---
@@ -61,7 +61,7 @@
 
 - Prisma：`User` 加 `phone`（可空唯一）、`role`、`status`、`tokenVersion`、`avatarUrl`、入职字段（`profileRole`/`displayName`/`schoolId`/`schoolNameFreeText`/`city`/`stages`/`grades`/`subjects`/`viewedKinds`/`collaborativeOptIn`/`onboardedAt`/`gradesUpdatedAt`）；新增 `School` / `Favorite` / `ViewEvent` / `OtpAttempt`；`Material` 加 `kind`(EXERCISE/HANDOUT/EXAM/MOCK)、`fileSafetyStatus`；枚举 `ProfileRole` / `OtpChannel` / `OtpPurpose` / `MaterialKind`。
 - NestJS：`auth/otp/`（send/verify、HMAC 入库、`timingSafeEqual`、5 分钟 TTL、5 次校验上限、`purpose` 隔离、Provider 自动降级 + fail-loud）；`users`（`/users/me/profile` GET/PUT）；`schools`（`/schools?city&q&limit`）；`favorites`（list/add/remove）；`view-events`（`POST /view-events`）；`materials/recommendations.service.ts`（内容匹配打分 + `getColleagueSignals` K-匿名 + opt-out）；`materials/recommend`。
-- Seed：北京/上海/广州/深圳/成都 各 10 所学校（含拼音首字母）+ 样本资料（带 `kind`）。
+- Seed：北京/上海/广州/深圳/成都 各 10 所学校（含拼音首字母）；样本资料有意不种（走真实上传路径）。
 - 安全 review pass：OTP 暴力破解桶、phone 登录锁修复（key 统一回 `login-email:`）、Provider fail-loud。
 
 ---
@@ -321,7 +321,7 @@
 
 ## 验证方案（按阶段）
 
-- **阶段 1**（已完成）：`npm run prisma:migrate` 成功；`npx prisma db seed` 学校 + 样本资料入库；phone 登录、`PUT /users/me/profile` 往返、`POST /favorites/:id` → `GET /favorites`、`GET /materials/recommend` 随 profile 变化；`recommendations` 打分 4 维度覆盖（可参照 `scripts/min-recommendations-check.ts`）。
+- **阶段 1**（已完成）：`npm run prisma:migrate` 成功；`npx prisma db seed` 学校入库（样本资料有意不种，走真实上传路径）；phone 登录、`PUT /users/me/profile` 往返、`POST /favorites/:id` → `GET /favorites`、`GET /materials/recommend` 随 profile 变化；`recommendations` 打分 4 维度覆盖（可参照 `scripts/min-recommendations-check.ts`）。
 - **阶段 2**：浏览器走 `/login`（手机号 tab）→ 强跳 `/onboarding` → 填完跳 `/`；二次登录不再跳 onboarding；Zustand 里看到 `user.stages` 等字段。
 - **阶段 3**：五个页面都能渲染、数据从 API 拉（Network 验证）；收藏/取消后侧栏数字立即更新；"换一批"调 `/materials/recommend` reroll；改完的 3 个测试 + `frontend/` `npm run quality:gate` 通过。
 - **阶段 4**：`/onboarding` 学校字段拼音搜 "shiyzx" 命中"实验中学"；任意页 ⌘K 输入"数学"看到资料/学科/年级三类；`/rank` 滚到底自动加载下一页。
