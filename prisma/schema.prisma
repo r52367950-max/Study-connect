@@ -139,6 +139,13 @@ model Material {
   status        MaterialStatus     @default(PENDING)
   reviewComment String?            @map("review_comment")
   fileSafetyStatus FileSafetyStatus? @map("file_safety_status")
+  // Denormalized read-path counters. downloadCount is incremented atomically with
+  // each Download row; ratingSum/ratingCount are recomputed from ratings after each
+  // upsert (convergent — a concurrent stale write self-heals on the next rating).
+  // Rebuild after manual data surgery with scripts/backfill-material-counters.ts.
+  downloadCount Int                @default(0) @map("download_count")
+  ratingSum     Int                @default(0) @map("rating_sum")
+  ratingCount   Int                @default(0) @map("rating_count")
   uploaderId    String             @map("uploader_id") @db.Uuid
   createdAt     DateTime           @default(now()) @map("created_at")
   updatedAt     DateTime           @updatedAt @map("updated_at")
@@ -152,6 +159,9 @@ model Material {
 
   @@index([uploaderId])
   @@index([status, createdAt])
+  // Covers the public-list WHERE (status, visibility, safety) so the per-page
+  // COUNT(*) runs as an index-only scan instead of a seq scan.
+  @@index([status, visibility, fileSafetyStatus])
   @@index([status, subject])
   @@index([status, stage, grade])
   @@index([status, year])

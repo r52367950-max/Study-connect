@@ -155,7 +155,7 @@ class PrismaServiceMock {
       const firstOrder = orderBy?.[0] ?? {};
       if ('createdAt' in firstOrder) {
         ordered.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-      } else if ('downloads' in firstOrder) {
+      } else if ('downloads' in firstOrder || 'downloadCount' in firstOrder) {
         ordered.sort((a, b) => this.countDownloads(b.id) - this.countDownloads(a.id));
       } else if ('ratings' in firstOrder) {
         ordered.sort((a, b) => this.countRatings(b.id) - this.countRatings(a.id));
@@ -171,6 +171,9 @@ class PrismaServiceMock {
             out._count = {
               downloads: this.countDownloads(material.id),
             };
+            continue;
+          }
+          if (this.applyCounterField(out, key, material.id)) {
             continue;
           }
           if (select[key]) {
@@ -205,6 +208,9 @@ class PrismaServiceMock {
           out._count = { downloads: this.countDownloads(material.id) };
           continue;
         }
+        if (this.applyCounterField(out, key, material.id)) {
+          continue;
+        }
         if (select[key]) {
           out[key] = (material as unknown as Record<string, unknown>)[key];
         }
@@ -212,6 +218,25 @@ class PrismaServiceMock {
       return out;
     },
   };
+
+  /** Denormalized counter columns, derived from the in-memory downloads/ratings arrays. */
+  private applyCounterField(out: Record<string, unknown>, key: string, materialId: string): boolean {
+    if (key === 'downloadCount') {
+      out.downloadCount = this.countDownloads(materialId);
+      return true;
+    }
+    if (key === 'ratingSum') {
+      out.ratingSum = this.ratings
+        .filter((r) => r.materialId === materialId)
+        .reduce((sum, r) => sum + r.score, 0);
+      return true;
+    }
+    if (key === 'ratingCount') {
+      out.ratingCount = this.countRatings(materialId);
+      return true;
+    }
+    return false;
+  }
 
   rating = {
     groupBy: async ({ where }: { where: { materialId: { in: string[] } } }) => {
@@ -241,6 +266,17 @@ class PrismaServiceMock {
         },
       };
     },
+  };
+
+  // The trigram branches run their raw query inside a batch transaction that first
+  // pins pg_trgm.similarity_threshold via $executeRaw (see runWithTrgmThreshold).
+  $executeRaw = async (): Promise<number> => 0;
+
+  $transaction = async (operations: unknown): Promise<unknown> => {
+    if (Array.isArray(operations)) {
+      return Promise.all(operations);
+    }
+    return (operations as (tx: this) => Promise<unknown>)(this);
   };
 
   // B1/C1-C3: the RATING sort branch uses $queryRaw(...) raw-SQL aggregation (the keyword

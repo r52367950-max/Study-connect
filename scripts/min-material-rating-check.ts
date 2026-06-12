@@ -107,6 +107,9 @@ class PrismaServiceMock {
       }
       return this.mapMaterial(material, select);
     },
+    // Denormalized rating counters refreshed after each upsert; the assertions in
+    // this script read the response payload, so accepting the write is enough.
+    update: async ({ where }: { where: { id: string } }) => ({ id: where.id }),
   };
 
   rating = {
@@ -182,9 +185,11 @@ class PrismaServiceMock {
 
     aggregate: async ({ where }: { where: { materialId: string } }) => {
       const list = this.ratings.filter((item) => item.materialId === where.materialId);
-      const avg = list.length ? list.reduce((sum, current) => sum + current.score, 0) / list.length : null;
+      const sum = list.reduce((acc, current) => acc + current.score, 0);
+      const avg = list.length ? sum / list.length : null;
       return {
         _avg: { score: avg },
+        _sum: { score: list.length ? sum : null },
         _count: { score: list.length },
       };
     },

@@ -44,6 +44,9 @@ export class FavoritesService {
     const pageSize = query.pageSize ?? 20;
     const skip = (page - 1) * pageSize;
 
+    // B7 figures (download count / avg score) now come from the denormalized material
+    // counters — the previous `_count: { downloads }` select forced Prisma to LEFT JOIN
+    // a GROUP BY over the entire downloads table per page, plus a rating.groupBy query.
     const [items, total] = await Promise.all([
       this.prisma.favorite.findMany({
         where: { userId },
@@ -63,8 +66,9 @@ export class FavoritesService {
               year: true,
               region: true,
               createdAt: true,
-              // B7: include download count aggregate
-              _count: { select: { downloads: true } },
+              downloadCount: true,
+              ratingSum: true,
+              ratingCount: true,
             },
           },
         },
@@ -72,28 +76,17 @@ export class FavoritesService {
       this.prisma.favorite.count({ where: { userId } }),
     ]);
 
-    // B7: fetch avg_score for all favorited materials in one batch query
-    const materialIds = items.map((row) => row.material.id);
-    const ratingAggregates = materialIds.length
-      ? await this.prisma.rating.groupBy({
-          by: ['materialId'],
-          where: { materialId: { in: materialIds } },
-          _avg: { score: true },
-          _count: { score: true },
-        })
-      : [];
-    const ratingMap = new Map(ratingAggregates.map((row) => [row.materialId, row._avg.score]));
-
     return {
       items: items.map((row) => {
-        const { _count, ...materialBase } = row.material;
+        const { downloadCount, ratingSum, ratingCount, ...materialBase } = row.material;
+        const ratings = ratingCount ?? 0;
         return {
           id: row.id,
           favoritedAt: row.createdAt.toISOString(),
           material: {
             ...materialBase,
-            avg_score: ratingMap.get(row.material.id) ?? null,
-            download_count: _count.downloads,
+            avg_score: ratings > 0 ? (ratingSum ?? 0) / ratings : null,
+            download_count: downloadCount ?? 0,
           },
         };
       }),

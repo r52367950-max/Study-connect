@@ -64,55 +64,57 @@ export class RecommendationsService {
     const limit = options.limit ?? DEFAULT_LIMIT;
     const ranker = options.ranker ?? DEFAULT_RANKER;
     const basePhase = this.pickBasePhase(user);
+    // Perf: the candidate pool is independent of phase selection, so it loads in
+    // parallel with the view-event probe instead of after it. Download/rating
+    // figures come from the denormalized material counters (downloadCount/
+    // ratingSum/ratingCount) — previously this fetch carried a LEFT JOIN that
+    // aggregated the whole downloads table plus a 200-id rating.groupBy.
     // B8: count distinct materialIds rather than total rows so the phase-2 threshold
     // reflects "how many different materials has the user seen" rather than total events.
-    // This aligns the metric with the frontend's per-session per-material impression dedup
-    // and avoids the threshold being reached artificially fast via dwell updates.
-    const viewEventCount =
+    // C4: only the phase-2 threshold check matters, so the distinct lookup is capped
+    // at VIEW_EVENT_PHASE2_MIN rows instead of loading the user's entire view history.
+    const [viewEventCount, materials] = await Promise.all([
       basePhase === 'phase-0'
-        ? 0
-        : // C4: only the phase-2 threshold check matters, so cap the distinct lookup at
-          // VIEW_EVENT_PHASE2_MIN rows instead of loading the user's entire view history.
-          await this.prisma.viewEvent.findMany({
-            where: { userId: user.id },
-            select: { materialId: true },
-            distinct: ['materialId'],
-            take: VIEW_EVENT_PHASE2_MIN,
-          }).then((rows) => rows.length);
+        ? Promise.resolve(0)
+        : this.prisma.viewEvent
+            .findMany({
+              where: { userId: user.id },
+              select: { materialId: true },
+              distinct: ['materialId'],
+              take: VIEW_EVENT_PHASE2_MIN,
+            })
+            .then((rows) => rows.length),
+      this.prisma.material.findMany({
+        where: {
+          status: MaterialStatus.APPROVED,
+          visibility: MaterialVisibility.PUBLIC,
+          // Same PASSED-or-null gate as the public list/detail paths; without it,
+          // QUARANTINED/SCANNING/FAILED files surface here and 404 on click/download.
+          OR: [{ fileSafetyStatus: FileSafetyStatus.PASSED }, { fileSafetyStatus: null }],
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+      }),
+    ]);
+
     const phase = await this.pickStrategy(user, { viewEventCount, basePhase });
-    const dynamicViewedKinds =
-      phase === 'phase-2' || phase === 'phase-3'
-        ? await this.getDynamicViewedKinds(user.id)
-        : [];
 
-    const materials = await this.prisma.material.findMany({
-      where: {
-        status: MaterialStatus.APPROVED,
-        visibility: MaterialVisibility.PUBLIC,
-        // Same PASSED-or-null gate as the public list/detail paths; without it,
-        // QUARANTINED/SCANNING/FAILED files surface here and 404 on click/download.
-        OR: [{ fileSafetyStatus: FileSafetyStatus.PASSED }, { fileSafetyStatus: null }],
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-      include: { _count: { select: { downloads: true } } },
-    });
-
-    const ids = materials.map((m) => m.id);
-    const aggregates = ids.length
-      ? await this.prisma.rating.groupBy({ by: ['materialId'], where: { materialId: { in: ids } }, _avg: { score: true }, _count: { score: true } })
-      : [];
-    const aggregateMap = new Map(aggregates.map((row) => [row.materialId, { avg: row._avg.score, count: row._count.score }]));
-
-    const colleagueSignals = phase === 'phase-3' ? await this.getColleagueSignals(user) : new Set<string>();
+    const [dynamicViewedKinds, colleagueSignals] = await Promise.all([
+      phase === 'phase-2' || phase === 'phase-3' ? this.getDynamicViewedKinds(user.id) : [],
+      phase === 'phase-3' ? this.getColleagueSignals(user) : new Set<string>(),
+    ]);
 
     const subjectKindMap: Record<string, MaterialKind | null> = { 习题: MaterialKind.EXERCISE, 讲义: MaterialKind.HANDOUT, 真题: MaterialKind.EXAM, 模拟: MaterialKind.MOCK };
     const viewedSource = phase === 'phase-2' || phase === 'phase-3' ? (dynamicViewedKinds.length ? dynamicViewedKinds : user.viewedKinds) : user.viewedKinds;
     const viewedKindEnums = new Set(viewedSource.map((k) => subjectKindMap[k] ?? null).filter((k): k is MaterialKind => !!k));
 
     const scored: RecommendationItem[] = materials.map((m) => {
-      const agg = aggregateMap.get(m.id) ?? { avg: null, count: 0 };
-      const downloads = m._count.downloads;
+      const ratingCount = m.ratingCount ?? 0;
+      const agg = {
+        avg: ratingCount > 0 ? (m.ratingSum ?? 0) / ratingCount : null,
+        count: ratingCount,
+      };
+      const downloads = m.downloadCount ?? 0;
       const contentEnabled = phase !== 'phase-0';
       const subjectMatch = contentEnabled && m.subject && user.subjects.includes(m.subject) ? 5 : 0;
       const gradeMatch = contentEnabled && m.grade && user.grades.includes(m.grade) ? 3 : 0;
