@@ -12,6 +12,7 @@ type SignedRequestOptions = {
 @Injectable()
 export class MinioService {
   private static readonly DEFAULT_SIGNED_URL_TTL_SECONDS = 300;
+  private static readonly MAX_SIGNED_URL_TTL_SECONDS = 900;
   private readonly endpoint: string;
   private readonly port: number;
   private readonly useSSL: boolean;
@@ -204,7 +205,7 @@ export class MinioService {
       return MinioService.DEFAULT_SIGNED_URL_TTL_SECONDS;
     }
 
-    return Math.floor(parsed);
+    return Math.min(Math.floor(parsed), MinioService.MAX_SIGNED_URL_TTL_SECONDS);
   }
 
   private sha256Hex(input: string | Buffer): string {
