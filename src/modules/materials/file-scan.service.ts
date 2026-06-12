@@ -6,6 +6,9 @@ import { assertUploadFileSecurity, UploadSecurityStatus } from './upload-securit
 const DEFAULT_SCAN_INTERVAL_MS = 30_000;
 const DEFAULT_SCAN_TIMEOUT_MS = 15_000;
 const MAX_ATTEMPTS = 3;
+// A RUNNING job untouched for this long can only be a crashed batch (a healthy scan
+// finishes within DEFAULT_SCAN_TIMEOUT_MS); re-queue it on the next tick.
+const STALE_RUNNING_MS = 10 * 60_000;
 
 @Injectable()
 export class FileScanService implements OnModuleInit, OnModuleDestroy {
@@ -23,6 +26,8 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
     this.timer = setInterval(() => {
       void this.runPendingScans();
     }, DEFAULT_SCAN_INTERVAL_MS);
+    // Like RateLimitService's sweeper: don't let the poll loop keep the process alive.
+    this.timer.unref?.();
   }
 
   onModuleDestroy(): void {
@@ -48,8 +53,19 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
     }
     this.isRunning = true;
     try {
+      const now = new Date();
       const jobs = await this.prisma.fileScanJob.findMany({
-        where: { status: FileScanJobStatus.PENDING, scheduledAt: { lte: new Date() } },
+        where: {
+          OR: [
+            { status: FileScanJobStatus.PENDING, scheduledAt: { lte: now } },
+            // Crash recovery: a process killed mid-batch leaves jobs stuck in RUNNING
+            // (and materials stuck in SCANNING) forever. Re-pick them once stale.
+            {
+              status: FileScanJobStatus.RUNNING,
+              updatedAt: { lt: new Date(now.getTime() - STALE_RUNNING_MS) },
+            },
+          ],
+        },
         orderBy: { scheduledAt: 'asc' },
         take: 5,
       });
@@ -108,7 +124,15 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async fetchObject(key: string): Promise<Buffer> {
-    const response = await fetch(this.minioService.getSignedDownloadUrl(key));
+    let response: Response;
+    try {
+      response = await fetch(this.minioService.getSignedDownloadUrl(key));
+    } catch {
+      // fetch() rejects with a generic "fetch failed" on connection-level errors. Map it
+      // into the MINIO_FETCH_FAILED family so a network blip gets the bounded transient
+      // retry instead of terminally marking the material FAILED.
+      throw new Error('MINIO_FETCH_FAILED:NETWORK');
+    }
     if (!response.ok) throw new Error(`MINIO_FETCH_FAILED:${response.status}`);
 
     // B4: enforce size cap before reading the full body to avoid OOM on large objects

@@ -20,6 +20,7 @@ const checks = [
   'test:min-material-upload-security-regression',
   'test:min-cors-config',
   'test:min-auth-token-hardening',
+  'test:min-file-scan-async',
 ];
 
 const results = [];

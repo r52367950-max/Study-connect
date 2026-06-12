@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { MaterialKind, MaterialStatus, MaterialVisibility, Prisma } from '@prisma/client';
+import { FileSafetyStatus, MaterialKind, MaterialStatus, MaterialVisibility, Prisma } from '@prisma/client';
 import { PrismaService } from '../../infra';
 
 export type RecommendUserProfile = {
@@ -89,6 +89,9 @@ export class RecommendationsService {
       where: {
         status: MaterialStatus.APPROVED,
         visibility: MaterialVisibility.PUBLIC,
+        // Same PASSED-or-null gate as the public list/detail paths; without it,
+        // QUARANTINED/SCANNING/FAILED files surface here and 404 on click/download.
+        OR: [{ fileSafetyStatus: FileSafetyStatus.PASSED }, { fileSafetyStatus: null }],
       },
       orderBy: { createdAt: 'desc' },
       take: 200,
