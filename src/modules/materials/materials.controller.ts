@@ -37,6 +37,7 @@ import { MaterialsService, UploadedMaterial } from './materials.service';
 import { RecommendationsService } from './recommendations.service';
 import {
   ALLOWED_MIME_TYPES,
+  assertUploadFileSecurity,
   assertUploadFileSize,
   getMaxUploadSizeMb,
   MAX_UPLOAD_SIZE_MB_KEY,
@@ -195,6 +196,7 @@ export class MaterialsController {
 
     try {
       assertUploadFileSize(file, maxUploadSizeMb);
+      assertUploadFileSecurity(file);
 
       return this.materialsService.createWithFile({
         uploaderId: req.user.id,

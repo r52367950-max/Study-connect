@@ -25,7 +25,7 @@ export class CsrfGuard implements CanActivate {
 
     const cookieToken = this.csrfService.extractCsrfCookie(request.headers.cookie);
     const csrfHeaderName = this.csrfService.getCsrfHeaderName();
-    const headerToken = request.headers[csrfHeaderName] as string | undefined;
+    const headerToken = this.extractSingleHeader(request.headers[csrfHeaderName]);
 
     if (!cookieToken || !headerToken) {
       throw new ForbiddenException('Missing CSRF token');
@@ -36,6 +36,13 @@ export class CsrfGuard implements CanActivate {
     }
 
     return true;
+  }
+
+  private extractSingleHeader(value: string | string[] | undefined): string | undefined {
+    if (typeof value === 'string') {
+      return value;
+    }
+    return undefined;
   }
 
   private extractRequestOrigin(request: Request): string {

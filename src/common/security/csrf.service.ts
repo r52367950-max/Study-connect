@@ -6,6 +6,8 @@ import { safeDecodeURIComponent } from '../util';
 
 const CSRF_COOKIE_NAME = 'csrf-token';
 const CSRF_HEADER_NAME = 'x-csrf-token';
+const CSRF_TOKEN_HEX_LENGTH = 64;
+const CSRF_TOKEN_PATTERN = /^[a-f0-9]{64}$/i;
 
 @Injectable()
 export class CsrfService {
@@ -40,21 +42,26 @@ export class CsrfService {
     for (const entry of cookieEntries) {
       const [rawName, ...rawValue] = entry.trim().split('=');
       if (rawName === CSRF_COOKIE_NAME && rawValue.length > 0) {
-        return safeDecodeURIComponent(rawValue.join('='));
+        const decoded = safeDecodeURIComponent(rawValue.join('='));
+        return this.isWellFormedToken(decoded) ? decoded : null;
       }
     }
     return null;
   }
 
   tokensMatch(cookieToken: string, headerToken: string): boolean {
-    const cookieBuffer = Buffer.from(cookieToken);
-    const headerBuffer = Buffer.from(headerToken);
-
-    if (cookieBuffer.length !== headerBuffer.length) {
+    if (!this.isWellFormedToken(cookieToken) || !this.isWellFormedToken(headerToken)) {
       return false;
     }
 
+    const cookieBuffer = Buffer.from(cookieToken, 'hex');
+    const headerBuffer = Buffer.from(headerToken, 'hex');
+
     return timingSafeEqual(cookieBuffer, headerBuffer);
+  }
+
+  isWellFormedToken(token: string): boolean {
+    return token.length === CSRF_TOKEN_HEX_LENGTH && CSRF_TOKEN_PATTERN.test(token);
   }
 
   private getCookieSecure(): boolean {

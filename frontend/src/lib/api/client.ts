@@ -10,6 +10,7 @@ export const apiClient = axios.create({
 const CSRF_COOKIE_NAME = 'csrf-token'
 export const CSRF_HEADER_NAME = 'x-csrf-token'
 const STATE_CHANGING_METHODS = new Set(['post', 'put', 'patch', 'delete'])
+const CSRF_TOKEN_PATTERN = /^[a-f0-9]{64}$/i
 let csrfBootstrapPromise: Promise<string> | null = null
 
 function isCsrfBootstrapRequest(requestUrl: string): boolean {
@@ -30,7 +31,12 @@ export function getCsrfTokenFromCookie(): string | null {
   for (const item of cookies) {
     const [rawName, ...rawValue] = item.trim().split('=')
     if (rawName === CSRF_COOKIE_NAME && rawValue.length > 0) {
-      return decodeURIComponent(rawValue.join('='))
+      try {
+        const decoded = decodeURIComponent(rawValue.join('='))
+        return CSRF_TOKEN_PATTERN.test(decoded) ? decoded : null
+      } catch {
+        return null
+      }
     }
   }
   return null

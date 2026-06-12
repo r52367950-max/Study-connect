@@ -39,6 +39,8 @@ type RefreshPayload = {
 };
 
 const scryptAsync = promisify(scrypt);
+const MAX_JWT_LENGTH = 4096;
+const JWT_SEGMENT_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 @Injectable()
 export class AuthService {
@@ -396,12 +398,20 @@ export class AuthService {
 
   private parseAndVerifyToken(token: string): Record<string, unknown> {
     try {
+      if (token.length > MAX_JWT_LENGTH) {
+        throw new Error('Token too large');
+      }
+
       const parts = token.split('.');
-      if (parts.length !== 3) {
+      if (parts.length !== 3 || parts.some((part) => !JWT_SEGMENT_PATTERN.test(part))) {
         throw new Error('Invalid token format');
       }
 
       const [encodedHeader, encodedPayload, signature] = parts;
+      const header = JSON.parse(this.base64UrlDecode(encodedHeader)) as Record<string, unknown>;
+      if (header.alg !== 'HS256' || header.typ !== 'JWT') {
+        throw new Error('Invalid token header');
+      }
       const unsigned = `${encodedHeader}.${encodedPayload}`;
       const expectedSignature = this.sign(unsigned);
 
