@@ -125,10 +125,16 @@ export class OtpService {
       throw new UnauthorizedException('Invalid or expired OTP');
     }
 
-    await this.prisma.otpAttempt.update({
-      where: { id: attempt.id },
+    // Atomic claim: the consumedAt-null condition makes concurrent consumes of the same
+    // code race on the row update — exactly one wins, so an OTP stays single-use.
+    const claimed = await this.prisma.otpAttempt.updateMany({
+      where: { id: attempt.id, consumedAt: null },
       data: { consumedAt: now },
     });
+    if (claimed.count === 0) {
+      this.logger.warn({ event: 'OTP_VERIFY_REPLAYED', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) });
+      throw new UnauthorizedException('Invalid or expired OTP');
+    }
 
     this.logger.log({ event: 'OTP_VERIFY_SUCCESS', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) });
   }

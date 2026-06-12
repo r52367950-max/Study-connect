@@ -123,10 +123,9 @@ export class MaterialsService {
         SELECT
           m.id, m.title, m.description, m.stage, m.grade, m.subject, m.kind, m.year, m.region,
           m.visibility, m.created_at AS "createdAt",
-          COUNT(d.id)::bigint AS "downloadCount",
+          (SELECT COUNT(*) FROM downloads d WHERE d.material_id = m.id)::bigint AS "downloadCount",
           COUNT(*) OVER()::bigint AS "totalCount"
         FROM materials m
-        LEFT JOIN downloads d ON d.material_id = m.id
         WHERE m.status = 'APPROVED'
           AND m.visibility = 'PUBLIC'
           AND (m.file_safety_status = 'PASSED' OR m.file_safety_status IS NULL)
@@ -136,7 +135,6 @@ export class MaterialsService {
           AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
           AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
           AND (similarity(m.title, ${q}) > 0 OR similarity(COALESCE(m.description, ''), ${q}) > 0)
-        GROUP BY m.id
         ORDER BY (similarity(m.title, ${q}) + similarity(COALESCE(m.description, ''), ${q})) DESC, m.created_at DESC
         LIMIT ${pageSize} OFFSET ${skip}
       `);
@@ -188,7 +186,10 @@ export class MaterialsService {
     }
 
     if (sort === MaterialSort.RATING) {
-      // B1 fix: use raw SQL with LEFT JOIN aggregation + LIMIT/OFFSET to avoid full-table load into memory.
+      // B1 fix: use raw SQL aggregation + LIMIT/OFFSET to avoid full-table load into memory.
+      // Aggregates are correlated subqueries (one indexed scan per material on
+      // ratings/downloads(material_id)) instead of LEFT JOINing both tables at once,
+      // which produced a ratings × downloads cartesian product per material.
       // C1: subject/stage/grade/region compared case-insensitively (LOWER = LOWER), matching
       //     buildApprovedWhere's `mode: 'insensitive'` so rating sort returns the same set as other sorts.
       // C2: when `q` is supplied, keep the keyword (trigram) filter — the keyword branch above only
@@ -214,13 +215,11 @@ export class MaterialsService {
         SELECT
           m.id, m.title, m.description, m.stage, m.grade, m.subject, m.kind, m.year, m.region,
           m.visibility, m.created_at AS "createdAt",
-          AVG(r.score) AS avg_score,
-          COUNT(DISTINCT r.id)::bigint AS rating_count,
-          COUNT(DISTINCT d.id)::bigint AS download_count,
+          (SELECT AVG(r.score) FROM ratings r WHERE r.material_id = m.id) AS avg_score,
+          (SELECT COUNT(*) FROM ratings r WHERE r.material_id = m.id)::bigint AS rating_count,
+          (SELECT COUNT(*) FROM downloads d WHERE d.material_id = m.id)::bigint AS download_count,
           COUNT(*) OVER()::bigint AS total_count
         FROM materials m
-        LEFT JOIN ratings r ON r.material_id = m.id
-        LEFT JOIN downloads d ON d.material_id = m.id
         WHERE m.status = 'APPROVED'
           AND m.visibility = 'PUBLIC'
           AND (m.file_safety_status = 'PASSED' OR m.file_safety_status IS NULL)
@@ -230,7 +229,6 @@ export class MaterialsService {
           AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
           AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
           AND (${q}::text IS NULL OR similarity(m.title, ${q}) > 0 OR similarity(COALESCE(m.description, ''), ${q}) > 0)
-        GROUP BY m.id
         ORDER BY avg_score DESC NULLS LAST, rating_count DESC, m.created_at DESC
         LIMIT ${pageSize} OFFSET ${skip}
       `);
@@ -354,6 +352,12 @@ export class MaterialsService {
         visibility: true,
         createdAt: true,
         uploaderId: true,
+        uploader: {
+          select: {
+            id: true,
+            username: true,
+          },
+        },
         _count: {
           select: {
             downloads: true,
@@ -371,6 +375,8 @@ export class MaterialsService {
     const { _count, ...base } = material;
     return {
       ...base,
+      // Mocked Prisma in min-* scripts may omit the relation; coerce to null for a stable shape.
+      uploader: material.uploader ?? null,
       avg_score: aggregate._avg.score ?? null,
       rating_count: aggregate._count.score,
       download_count: _count.downloads,
@@ -461,6 +467,12 @@ export class MaterialsService {
           comment: true,
           createdAt: true,
           updatedAt: true,
+          user: {
+            select: {
+              id: true,
+              username: true,
+            },
+          },
         },
       }),
       this.prisma.rating.count({ where: { materialId } }),
@@ -485,6 +497,8 @@ export class MaterialsService {
         content: item.comment,
         created_at: item.createdAt,
         updated_at: item.updatedAt,
+        // Reviewer identity for the ratings UI; null-coalesced for mocked Prisma in min-* scripts.
+        user: item.user ?? null,
       })),
     };
   }
@@ -524,7 +538,9 @@ export class MaterialsService {
         id: materialId,
         status: MaterialStatus.APPROVED,
         visibility: MaterialVisibility.PUBLIC,
-        fileSafetyStatus: FileSafetyStatus.PASSED,
+        // PASSED or null (pre-scan legacy rows) — must mirror buildApprovedWhere and the
+        // raw-SQL list branches, otherwise a material visible in lists 404s on detail/ratings.
+        OR: [{ fileSafetyStatus: FileSafetyStatus.PASSED }, { fileSafetyStatus: null }],
       },
       select,
     });
@@ -545,11 +561,13 @@ export class MaterialsService {
       },
     });
 
-    if (material.fileSafetyStatus !== FileSafetyStatus.PASSED) {
+    // Defense-in-depth tripwire: ensurePublicApprovedMaterial only returns PASSED/null rows,
+    // but if its filter ever regresses, block the download here and raise the alert.
+    if (material.fileSafetyStatus !== FileSafetyStatus.PASSED && material.fileSafetyStatus !== null) {
       this.logger.warn({
         event: 'SECURITY_ALERT_DOWNLOAD_BLOCKED',
         materialId,
-        fileSafetyStatus: material.fileSafetyStatus ?? null,
+        fileSafetyStatus: material.fileSafetyStatus,
         timestamp: new Date().toISOString(),
       });
       throw new NotFoundException('Material not found');
