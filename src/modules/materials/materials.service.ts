@@ -28,6 +28,19 @@ export type UploadedMaterial = Pick<
   | 'fileSafetyStatus'
 >;
 
+/**
+ * Trigram threshold backing the keyword search's `%` operator. The previous
+ * predicate `similarity(col, q) > 0` could not use the GIN trigram indexes
+ * (function call on the left side), forcing a per-row similarity() over every
+ * approved material. `col % q` is index-driven but compares against the
+ * pg_trgm.similarity_threshold GUC, so each search SETs it LOCAL-ly to a value
+ * small enough to keep the original "shares at least one trigram" recall
+ * (min positive similarity ≈ 1/union-trigrams; 0.001 covers texts up to ~1000
+ * trigrams). Applied via SET LOCAL inside the same transaction as the query so
+ * pooled connections never leak the setting.
+ */
+const TRGM_MIN_SIMILARITY = 0.001;
+
 @Injectable()
 export class MaterialsService {
   private readonly logger = new Logger(MaterialsService.name);
@@ -105,7 +118,11 @@ export class MaterialsService {
 
     if (query.q && query.q.trim() && sort !== MaterialSort.RATING) {
       const q = query.q.trim();
-      const rows = await this.prisma.$queryRaw<Array<{
+      // `title % q` / `description % q` drive a BitmapOr over the two GIN trigram
+      // indexes; ordering still ranks by exact similarity() on the matched rows only.
+      // `description % q` is NULL (falsy) for NULL descriptions, matching the old
+      // similarity(COALESCE(description,''), q) > 0 which was always false there.
+      const rows = await this.runWithTrgmThreshold(this.prisma.$queryRaw<Array<{
         id: string;
         title: string;
         description: string | null;
@@ -117,13 +134,17 @@ export class MaterialsService {
         region: string | null;
         visibility: MaterialVisibility;
         createdAt: Date;
-        downloadCount: bigint;
+        downloadCount: number;
+        ratingSum: number;
+        ratingCount: number;
         totalCount: bigint;
       }>>(Prisma.sql`
         SELECT
           m.id, m.title, m.description, m.stage, m.grade, m.subject, m.kind, m.year, m.region,
           m.visibility, m.created_at AS "createdAt",
-          (SELECT COUNT(*) FROM downloads d WHERE d.material_id = m.id)::bigint AS "downloadCount",
+          m.download_count AS "downloadCount",
+          m.rating_sum AS "ratingSum",
+          m.rating_count AS "ratingCount",
           COUNT(*) OVER()::bigint AS "totalCount"
         FROM materials m
         WHERE m.status = 'APPROVED'
@@ -134,16 +155,16 @@ export class MaterialsService {
           AND (${query.grade ?? null}::text IS NULL OR LOWER(m.grade) = LOWER(${query.grade ?? null}))
           AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
           AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
-          AND (similarity(m.title, ${q}) > 0 OR similarity(COALESCE(m.description, ''), ${q}) > 0)
+          AND (m.title % ${q} OR m.description % ${q})
         ORDER BY (similarity(m.title, ${q}) + similarity(COALESCE(m.description, ''), ${q})) DESC, m.created_at DESC
         LIMIT ${pageSize} OFFSET ${skip}
-      `);
+      `));
       // COUNT(*) OVER() only yields a value on non-empty pages. For an out-of-range
       // OFFSET (skip > 0 with no rows) fall back to a dedicated count so pagination metadata
       // stays correct instead of collapsing to total: 0 while earlier pages have matches.
       let total = rows[0] ? Number(rows[0].totalCount) : 0;
       if (rows.length === 0 && skip > 0) {
-        const countRows = await this.prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`
+        const countRows = await this.runWithTrgmThreshold(this.prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`
           SELECT COUNT(*)::bigint AS total
           FROM materials m
           WHERE m.status = 'APPROVED'
@@ -154,15 +175,10 @@ export class MaterialsService {
             AND (${query.grade ?? null}::text IS NULL OR LOWER(m.grade) = LOWER(${query.grade ?? null}))
             AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
             AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
-            AND (similarity(m.title, ${q}) > 0 OR similarity(COALESCE(m.description, ''), ${q}) > 0)
-        `);
+            AND (m.title % ${q} OR m.description % ${q})
+        `));
         total = countRows[0] ? Number(countRows[0].total) : 0;
       }
-      const materialIds = rows.map((item) => item.id);
-      const averages = materialIds.length
-        ? await this.prisma.rating.groupBy({ by: ['materialId'], where: { materialId: { in: materialIds } }, _avg: { score: true } })
-        : [];
-      const averageMap = new Map(averages.map((row) => [row.materialId, row._avg.score]));
       return {
         page,
         pageSize,
@@ -179,23 +195,24 @@ export class MaterialsService {
           region: item.region,
           visibility: item.visibility,
           createdAt: item.createdAt,
-          avg_score: averageMap.get(item.id) ?? null,
-          download_count: Number(item.downloadCount),
+          avg_score: averageFromCounters(item.ratingSum, item.ratingCount),
+          download_count: Number(item.downloadCount ?? 0),
         })),
       };
     }
 
     if (sort === MaterialSort.RATING) {
-      // B1 fix: use raw SQL aggregation + LIMIT/OFFSET to avoid full-table load into memory.
-      // Aggregates are correlated subqueries (one indexed scan per material on
-      // ratings/downloads(material_id)) instead of LEFT JOINing both tables at once,
-      // which produced a ratings × downloads cartesian product per material.
+      // B1 fix: raw SQL + LIMIT/OFFSET to avoid full-table load into memory.
+      // Perf: avg/count/downloads now come from the denormalized material counters
+      // (rating_sum/rating_count/download_count) instead of per-row correlated
+      // subqueries, which ran 2 indexed scans on ratings + 1 on downloads for every
+      // candidate row (≈30k scans per page on a 15k-material corpus).
       // C1: subject/stage/grade/region compared case-insensitively (LOWER = LOWER), matching
       //     buildApprovedWhere's `mode: 'insensitive'` so rating sort returns the same set as other sorts.
       // C2: when `q` is supplied, keep the keyword (trigram) filter — the keyword branch above only
       //     runs for non-RATING sorts, so without this `?q=...&sort=rating` would ignore the keyword.
       const q = query.q && query.q.trim() ? query.q.trim() : null;
-      const ratingRows = await this.prisma.$queryRaw<Array<{
+      const ratingRows = await this.runWithTrgmThreshold(this.prisma.$queryRaw<Array<{
         id: string;
         title: string;
         description: string | null;
@@ -208,16 +225,16 @@ export class MaterialsService {
         visibility: MaterialVisibility;
         createdAt: Date;
         avg_score: number | null;
-        rating_count: bigint;
-        download_count: bigint;
+        rating_count: number;
+        download_count: number;
         total_count: bigint;
       }>>(Prisma.sql`
         SELECT
           m.id, m.title, m.description, m.stage, m.grade, m.subject, m.kind, m.year, m.region,
           m.visibility, m.created_at AS "createdAt",
-          (SELECT AVG(r.score) FROM ratings r WHERE r.material_id = m.id) AS avg_score,
-          (SELECT COUNT(*) FROM ratings r WHERE r.material_id = m.id)::bigint AS rating_count,
-          (SELECT COUNT(*) FROM downloads d WHERE d.material_id = m.id)::bigint AS download_count,
+          (CASE WHEN m.rating_count > 0 THEN m.rating_sum::double precision / m.rating_count END) AS avg_score,
+          m.rating_count AS rating_count,
+          m.download_count AS download_count,
           COUNT(*) OVER()::bigint AS total_count
         FROM materials m
         WHERE m.status = 'APPROVED'
@@ -228,17 +245,17 @@ export class MaterialsService {
           AND (${query.grade ?? null}::text IS NULL OR LOWER(m.grade) = LOWER(${query.grade ?? null}))
           AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
           AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
-          AND (${q}::text IS NULL OR similarity(m.title, ${q}) > 0 OR similarity(COALESCE(m.description, ''), ${q}) > 0)
+          AND (${q}::text IS NULL OR m.title % ${q} OR m.description % ${q})
         ORDER BY avg_score DESC NULLS LAST, rating_count DESC, m.created_at DESC
         LIMIT ${pageSize} OFFSET ${skip}
-      `);
+      `));
 
       // C3: COUNT(*) OVER() only yields a value on non-empty pages. For an out-of-range
       // OFFSET (skip > 0 with no rows) fall back to a dedicated count so pagination metadata
       // stays correct instead of collapsing to total: 0 while earlier pages have matches.
       let total = ratingRows[0] ? Number(ratingRows[0].total_count) : 0;
       if (ratingRows.length === 0 && skip > 0) {
-        const countRows = await this.prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`
+        const countRows = await this.runWithTrgmThreshold(this.prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`
           SELECT COUNT(*)::bigint AS total
           FROM materials m
           WHERE m.status = 'APPROVED'
@@ -249,8 +266,8 @@ export class MaterialsService {
             AND (${query.grade ?? null}::text IS NULL OR LOWER(m.grade) = LOWER(${query.grade ?? null}))
             AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
             AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
-            AND (${q}::text IS NULL OR similarity(m.title, ${q}) > 0 OR similarity(COALESCE(m.description, ''), ${q}) > 0)
-        `);
+            AND (${q}::text IS NULL OR m.title % ${q} OR m.description % ${q})
+        `));
         total = countRows[0] ? Number(countRows[0].total) : 0;
       }
 
@@ -276,6 +293,11 @@ export class MaterialsService {
       };
     }
 
+    // Perf: download/rating figures come from the denormalized counters on the row
+    // itself. The previous `_count: { downloads }` select made Prisma LEFT JOIN
+    // `(SELECT material_id, COUNT(*) FROM downloads GROUP BY material_id)` — a full
+    // aggregation of the downloads table on every page — and a second query
+    // (rating.groupBy) fetched the page's averages.
     const [items, total] = await Promise.all([
       this.prisma.material.findMany({
         where,
@@ -294,26 +316,13 @@ export class MaterialsService {
           region: true,
           visibility: true,
           createdAt: true,
-          _count: {
-            select: {
-              downloads: true,
-            },
-          },
+          downloadCount: true,
+          ratingSum: true,
+          ratingCount: true,
         },
       }),
       this.prisma.material.count({ where }),
     ]);
-
-    const materialIds = items.map((item) => item.id);
-    const averages = materialIds.length
-      ? await this.prisma.rating.groupBy({
-          by: ['materialId'],
-          where: { materialId: { in: materialIds } },
-          _avg: { score: true },
-        })
-      : [];
-
-    const averageMap = new Map(averages.map((row) => [row.materialId, row._avg.score]));
 
     return {
       page,
@@ -331,13 +340,15 @@ export class MaterialsService {
         region: item.region,
         visibility: item.visibility,
         createdAt: item.createdAt,
-        avg_score: averageMap.get(item.id) ?? null,
-        download_count: item._count.downloads,
+        avg_score: averageFromCounters(item.ratingSum, item.ratingCount),
+        download_count: item.downloadCount ?? 0,
       })),
     };
   }
 
   async getApprovedDetail(id: string) {
+    // Perf: counters live on the material row, so the detail page is a single query
+    // (previously: material + downloads aggregation join + a rating.aggregate query).
     const material = await this.ensurePublicApprovedMaterial(id, {
       select: {
         id: true,
@@ -358,28 +369,20 @@ export class MaterialsService {
             username: true,
           },
         },
-        _count: {
-          select: {
-            downloads: true,
-          },
-        },
+        downloadCount: true,
+        ratingSum: true,
+        ratingCount: true,
       },
     });
 
-    const aggregate = await this.prisma.rating.aggregate({
-      where: { materialId: material.id },
-      _avg: { score: true },
-      _count: { score: true },
-    });
-
-    const { _count, ...base } = material;
+    const { downloadCount, ratingSum, ratingCount, ...base } = material;
     return {
       ...base,
       // Mocked Prisma in min-* scripts may omit the relation; coerce to null for a stable shape.
       uploader: material.uploader ?? null,
-      avg_score: aggregate._avg.score ?? null,
-      rating_count: aggregate._count.score,
-      download_count: _count.downloads,
+      avg_score: averageFromCounters(ratingSum, ratingCount),
+      rating_count: ratingCount ?? 0,
+      download_count: downloadCount ?? 0,
     };
   }
 
@@ -430,7 +433,20 @@ export class MaterialsService {
     const aggregate = await this.prisma.rating.aggregate({
       where: { materialId: params.materialId },
       _avg: { score: true },
+      _sum: { score: true },
       _count: { score: true },
+    });
+
+    // Refresh the denormalized counters from the authoritative aggregate. Recompute
+    // (not delta) keeps this convergent: a racing stale write is corrected by the
+    // next rating, and scripts/backfill-material-counters.ts can rebuild at any time.
+    await this.prisma.material.update({
+      where: { id: params.materialId },
+      data: {
+        ratingSum: aggregate._sum.score ?? 0,
+        ratingCount: aggregate._count.score,
+      },
+      select: { id: true },
     });
 
     return {
@@ -506,18 +522,27 @@ export class MaterialsService {
   async downloadApprovedMaterial(materialId: string, userId: string) {
     const material = await this.ensureDownloadablePublicMaterial(materialId);
 
-    const download = await this.prisma.download.create({
-      data: {
-        userId,
-        materialId: material.id,
-      },
-      select: {
-        id: true,
-        userId: true,
-        materialId: true,
-        downloadedAt: true,
-      },
-    });
+    // Atomic pair: the download row and the denormalized counter move together,
+    // so list/detail sort orders never drift from the downloads table.
+    const [download] = await this.prisma.$transaction([
+      this.prisma.download.create({
+        data: {
+          userId,
+          materialId: material.id,
+        },
+        select: {
+          id: true,
+          userId: true,
+          materialId: true,
+          downloadedAt: true,
+        },
+      }),
+      this.prisma.material.update({
+        where: { id: material.id },
+        data: { downloadCount: { increment: 1 } },
+        select: { id: true },
+      }),
+    ]);
 
     return {
       materialId: material.id,
@@ -605,8 +630,11 @@ export class MaterialsService {
   }
 
   private buildOrderBy(sort: MaterialSort, hasKeyword: boolean): Prisma.MaterialOrderByWithRelationInput[] {
+    // Perf: sort on the denormalized downloadCount column. The relation-count form
+    // ({ downloads: { _count: 'desc' } }) made Prisma LEFT JOIN a GROUP BY over the
+    // whole downloads table twice (once for ordering, once for the count selection).
     if (sort === MaterialSort.DOWNLOADS) {
-      return [{ downloads: { _count: 'desc' } }, { createdAt: 'desc' }];
+      return [{ downloadCount: 'desc' }, { createdAt: 'desc' }];
     }
 
     if (sort === MaterialSort.RATING) {
@@ -615,10 +643,35 @@ export class MaterialsService {
 
     if (sort === MaterialSort.RELEVANCE) {
       return hasKeyword
-        ? [{ downloads: { _count: 'desc' } }, { createdAt: 'desc' }]
+        ? [{ downloadCount: 'desc' }, { createdAt: 'desc' }]
         : [{ createdAt: 'desc' }];
     }
 
     return [{ createdAt: 'desc' }];
   }
+
+  /**
+   * Runs a raw trigram query in a batch transaction that first pins
+   * pg_trgm.similarity_threshold (SET LOCAL — scoped to the transaction, so the
+   * pooled connection is left untouched). See TRGM_MIN_SIMILARITY.
+   */
+  private runWithTrgmThreshold<T>(query: Prisma.PrismaPromise<T>): Promise<T> {
+    return this.prisma
+      .$transaction([
+        this.prisma.$executeRaw(
+          Prisma.sql`SET LOCAL pg_trgm.similarity_threshold = ${Prisma.raw(String(TRGM_MIN_SIMILARITY))}`,
+        ),
+        query,
+      ])
+      .then((results) => results[1] as T);
+  }
+}
+
+/** avg = sum/count from the denormalized counters; null when unrated (or counters absent in mocks). */
+function averageFromCounters(sum: number | null | undefined, count: number | null | undefined): number | null {
+  const ratingCount = Number(count ?? 0);
+  if (!ratingCount) {
+    return null;
+  }
+  return Number(sum ?? 0) / ratingCount;
 }

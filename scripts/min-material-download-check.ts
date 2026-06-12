@@ -53,6 +53,15 @@ class PrismaServiceMock {
   private materials: DbMaterial[] = [];
   private downloads: DbDownload[] = [];
 
+  // The download write path pairs download.create with the denormalized
+  // material.downloadCount increment inside a batch transaction.
+  $transaction = async (operations: unknown): Promise<unknown> => {
+    if (Array.isArray(operations)) {
+      return Promise.all(operations);
+    }
+    return (operations as (tx: this) => Promise<unknown>)(this);
+  };
+
   user = {
     findFirst: async ({ where }: { where: { OR: Array<{ email?: string; username?: string }> } }) => {
       return (
@@ -113,6 +122,7 @@ class PrismaServiceMock {
       }
       return out;
     },
+    update: async ({ where }: { where: { id: string } }) => ({ id: where.id }),
   };
 
   download = {

@@ -1,6 +1,8 @@
 import * as Sentry from '@sentry/node';
-import { HttpStatus, Logger, ValidationPipe } from '@nestjs/common';
+import { HttpStatus, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { Logger } from 'nestjs-pino';
+import compression from 'compression';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Request, Response, NextFunction } from 'express';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -50,6 +52,18 @@ async function bootstrap() {
   }
 
   app.use(applySecurityHeaders);
+  // gzip JSON responses (negotiated via Accept-Encoding). threshold keeps small
+  // payloads (e.g. the /auth/csrf token body) uncompressed, which also sidesteps
+  // BREACH-style concerns — secrets only travel in sub-threshold responses here.
+  // level 6 is zlib's balanced default; COMPRESSION_LEVEL (0-9) overrides, out-of-range
+  // values fall back to 6 instead of surfacing as a zlib error on the first response.
+  const compressionLevel = Number(process.env.COMPRESSION_LEVEL ?? '6');
+  app.use(
+    compression({
+      threshold: 1024,
+      level: compressionLevel >= 0 && compressionLevel <= 9 ? compressionLevel : 6,
+    }),
+  );
   app.useGlobalFilters(new HttpExceptionFilter(isProduction));
 
   app.useGlobalPipes(

@@ -5,8 +5,9 @@ function assert(c: unknown, m: string): asserts c { if (!c) throw new Error(m); 
 
 async function run(){
   const prisma:any={
-    $queryRaw: async ()=>[{id:'1',title:'高一数学函数练习',description:'',stage:'高中',grade:'高一',subject:'数学',year:2024,region:'北京',visibility:'PUBLIC',createdAt:new Date(),downloadCount:5n,totalCount:1n}],
-    rating:{groupBy: async ()=>[{materialId:'1',_avg:{score:4.9}}]},
+    $queryRaw: async ()=>[{id:'1',title:'高一数学函数练习',description:'',stage:'高中',grade:'高一',subject:'数学',year:2024,region:'北京',visibility:'PUBLIC',createdAt:new Date(),downloadCount:5,ratingSum:49,ratingCount:10,totalCount:1n}],
+    $executeRaw: async ()=>0,
+    $transaction: async (ops:any)=>Array.isArray(ops)?Promise.all(ops):ops(prisma),
     material:{findMany: async ()=>[],count: async ()=>0},
   };
   const service=new MaterialsService(prisma, {} as any, {enqueueScan: async()=>{}} as any);

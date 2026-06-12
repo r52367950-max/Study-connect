@@ -26,10 +26,16 @@ type StubMaterial = {
   status: MaterialStatus;
   visibility: MaterialVisibility;
   createdAt: Date;
+  // Denormalized counters — the service reads these directly off the row now
+  // (the old `_count: { downloads }` include / rating.groupBy pair is gone).
+  downloadCount: number;
+  ratingSum: number;
+  ratingCount: number;
   _count: { downloads: number };
 };
 
 function makeMaterial(overrides: Partial<StubMaterial>): StubMaterial {
+  const downloads = overrides._count?.downloads ?? overrides.downloadCount ?? 0;
   return {
     id: overrides.id ?? cryptoRandom(),
     title: overrides.title ?? 'untitled',
@@ -43,7 +49,10 @@ function makeMaterial(overrides: Partial<StubMaterial>): StubMaterial {
     status: MaterialStatus.APPROVED,
     visibility: MaterialVisibility.PUBLIC,
     createdAt: new Date(),
-    _count: overrides._count ?? { downloads: 0 },
+    downloadCount: downloads,
+    ratingSum: overrides.ratingSum ?? 0,
+    ratingCount: overrides.ratingCount ?? 0,
+    _count: { downloads },
   };
 }
 
@@ -62,9 +71,17 @@ function buildPrismaStub(opts: {
   // schoolUserCount above SCHOOL_DENSITY_MIN (10), so phase-2/3 paths can
   // be reached when the user profile requests them; phase selection still
   // hinges on collaborativeOptIn + schoolId in the user profile.
+  // Rating aggregates are denormalized onto the material rows the service reads.
+  const ratingByMaterial = new Map((opts.ratings ?? []).map((r) => [r.materialId, r]));
   return {
     material: {
-      findMany: async () => opts.materials,
+      findMany: async () =>
+        opts.materials.map((m) => {
+          const rating = ratingByMaterial.get(m.id);
+          return rating
+            ? { ...m, ratingSum: rating.avg * rating.count, ratingCount: rating.count }
+            : m;
+        }),
     },
     rating: {
       groupBy: async () =>
