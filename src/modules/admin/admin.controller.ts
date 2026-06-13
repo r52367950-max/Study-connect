@@ -36,6 +36,18 @@ export class AdminController {
     return this.adminService.getPendingMaterials(query.page ?? 1, query.pageSize ?? 10);
   }
 
+  @Get('file-scans/failed')
+  @ApiOperation({ summary: 'List failed file scan jobs with pagination' })
+  getFailedFileScans(@Query() query: PendingMaterialsQueryDto) {
+    return this.adminService.getFailedFileScans(query.page ?? 1, query.pageSize ?? 10);
+  }
+
+  @Post('file-scans/:id/retry')
+  @ApiOperation({ summary: 'Retry one failed file scan job' })
+  retryFileScan(@Param('id', adminIdParam) id: string) {
+    return this.adminService.retryFileScan(id);
+  }
+
   @Post('materials/:id/approve')
   @ApiOperation({ summary: 'Approve one material' })
   @ApiOkResponse({

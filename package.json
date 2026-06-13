@@ -34,7 +34,8 @@
     "backfill:material-counters": "ts-node scripts/backfill-material-counters.ts",
     "test:min-file-scan-async": "ts-node scripts/min-file-scan-async-check.ts",
     "test:min-recommend-tiering": "ts-node scripts/min-recommend-tiering-check.ts",
-    "test:min-search-fts": "ts-node scripts/min-search-fts-check.ts"
+    "test:min-search-fts": "ts-node scripts/min-search-fts-check.ts",
+    "test:min-file-scan-claim-concurrency": "ts-node scripts/min-file-scan-claim-concurrency-check.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
