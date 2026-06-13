@@ -1,9 +1,9 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { createHash, createHmac } from 'crypto';
+import { Injectable, InternalServerErrorException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { createHash, createHmac } from "crypto";
 
 type SignedRequestOptions = {
-  method: 'PUT' | 'HEAD' | 'DELETE';
+  method: "PUT" | "HEAD" | "DELETE";
   canonicalUri: string;
   payload?: Buffer;
   contentType?: string;
@@ -23,23 +23,29 @@ export class MinioService {
   private readonly signedUrlTtlSeconds: number;
 
   constructor(private readonly configService: ConfigService) {
-    this.endpoint = this.configService.get<string>('MINIO_ENDPOINT') ?? 'localhost';
-    this.port = Number(this.configService.get<string>('MINIO_PORT') ?? 9000);
-    this.useSSL = this.configService.get<string>('MINIO_USE_SSL') === 'true';
-    this.accessKey = this.configService.get<string>('MINIO_ACCESS_KEY') ?? '';
-    this.secretKey = this.configService.get<string>('MINIO_SECRET_KEY') ?? '';
-    this.bucket = this.configService.get<string>('MINIO_BUCKET') ?? 'study-connect';
-    this.region = this.configService.get<string>('MINIO_REGION') ?? 'us-east-1';
+    this.endpoint =
+      this.configService.get<string>("MINIO_ENDPOINT") ?? "localhost";
+    this.port = Number(this.configService.get<string>("MINIO_PORT") ?? 9000);
+    this.useSSL = this.configService.get<string>("MINIO_USE_SSL") === "true";
+    this.accessKey = this.configService.get<string>("MINIO_ACCESS_KEY") ?? "";
+    this.secretKey = this.configService.get<string>("MINIO_SECRET_KEY") ?? "";
+    this.bucket =
+      this.configService.get<string>("MINIO_BUCKET") ?? "study-connect";
+    this.region = this.configService.get<string>("MINIO_REGION") ?? "us-east-1";
     this.signedUrlTtlSeconds = this.parseSignedUrlTtlSeconds(
-      this.configService.get<string>('MINIO_SIGNED_URL_TTL_SECONDS'),
+      this.configService.get<string>("MINIO_SIGNED_URL_TTL_SECONDS"),
     );
   }
 
-  async uploadObject(key: string, payload: Buffer, contentType: string): Promise<string> {
+  async uploadObject(
+    key: string,
+    payload: Buffer,
+    contentType: string,
+  ): Promise<string> {
     await this.ensureBucket();
 
     await this.signedRequest({
-      method: 'PUT',
+      method: "PUT",
       canonicalUri: `/${this.bucket}/${this.encodePath(key)}`,
       payload,
       contentType,
@@ -50,12 +56,14 @@ export class MinioService {
 
   async deleteObject(key: string): Promise<void> {
     const response = await this.signedRequest({
-      method: 'DELETE',
-      canonicalUri: `/${this.bucket}/${this.encodePath(key)}` ,
+      method: "DELETE",
+      canonicalUri: `/${this.bucket}/${this.encodePath(key)}`,
     });
 
     if (!response.ok && response.status !== 404) {
-      throw new InternalServerErrorException('Failed to delete object from MinIO');
+      throw new InternalServerErrorException(
+        "Failed to delete object from MinIO",
+      );
     }
   }
 
@@ -63,9 +71,18 @@ export class MinioService {
     return `${this.baseUrl()}/${this.bucket}/${this.encodePath(key)}`;
   }
 
-  getSignedDownloadUrl(key: string, ttlSeconds: number = this.signedUrlTtlSeconds): string {
+  async getObjectResponse(key: string, ttlSeconds?: number): Promise<Response> {
+    return fetch(this.getSignedDownloadUrl(key, ttlSeconds));
+  }
+
+  getSignedDownloadUrl(
+    key: string,
+    ttlSeconds: number = this.signedUrlTtlSeconds,
+  ): string {
     if (!this.accessKey || !this.secretKey) {
-      throw new InternalServerErrorException('MinIO credentials are not configured');
+      throw new InternalServerErrorException(
+        "MinIO credentials are not configured",
+      );
     }
 
     const safeTtlSeconds = this.parseSignedUrlTtlSeconds(String(ttlSeconds));
@@ -74,68 +91,77 @@ export class MinioService {
     const amzDate = this.getAmzDate();
     const dateStamp = amzDate.slice(0, 8);
     const credentialScope = `${dateStamp}/${this.region}/s3/aws4_request`;
-    const signedHeaders = 'host';
+    const signedHeaders = "host";
 
     const queryParams = [
-      ['X-Amz-Algorithm', 'AWS4-HMAC-SHA256'],
-      ['X-Amz-Credential', `${this.accessKey}/${credentialScope}`],
-      ['X-Amz-Date', amzDate],
-      ['X-Amz-Expires', String(safeTtlSeconds)],
-      ['X-Amz-SignedHeaders', signedHeaders],
+      ["X-Amz-Algorithm", "AWS4-HMAC-SHA256"],
+      ["X-Amz-Credential", `${this.accessKey}/${credentialScope}`],
+      ["X-Amz-Date", amzDate],
+      ["X-Amz-Expires", String(safeTtlSeconds)],
+      ["X-Amz-SignedHeaders", signedHeaders],
     ] as const;
 
     const canonicalQueryString = queryParams
-      .map(([queryKey, queryValue]) => `${this.encodeQuery(queryKey)}=${this.encodeQuery(queryValue)}`)
-      .join('&');
+      .map(
+        ([queryKey, queryValue]) =>
+          `${this.encodeQuery(queryKey)}=${this.encodeQuery(queryValue)}`,
+      )
+      .join("&");
 
     const canonicalRequest = [
-      'GET',
+      "GET",
       canonicalUri,
       canonicalQueryString,
       `host:${host}\n`,
       signedHeaders,
-      'UNSIGNED-PAYLOAD',
-    ].join('\n');
+      "UNSIGNED-PAYLOAD",
+    ].join("\n");
 
     const stringToSign = [
-      'AWS4-HMAC-SHA256',
+      "AWS4-HMAC-SHA256",
       amzDate,
       credentialScope,
       this.sha256Hex(canonicalRequest),
-    ].join('\n');
+    ].join("\n");
 
     const signingKey = this.getSigningKey(dateStamp);
-    const signature = createHmac('sha256', signingKey).update(stringToSign).digest('hex');
+    const signature = createHmac("sha256", signingKey)
+      .update(stringToSign)
+      .digest("hex");
 
     return `${this.baseUrl()}${canonicalUri}?${canonicalQueryString}&X-Amz-Signature=${signature}`;
   }
 
   private async ensureBucket(): Promise<void> {
     const headResponse = await this.signedRequest({
-      method: 'HEAD',
+      method: "HEAD",
       canonicalUri: `/${this.bucket}`,
     });
 
     if (headResponse.status === 404) {
       const createResponse = await this.signedRequest({
-        method: 'PUT',
+        method: "PUT",
         canonicalUri: `/${this.bucket}`,
       });
 
       if (!createResponse.ok) {
-        throw new InternalServerErrorException('Failed to create MinIO bucket');
+        throw new InternalServerErrorException("Failed to create MinIO bucket");
       }
       return;
     }
 
     if (!headResponse.ok) {
-      throw new InternalServerErrorException('Failed to access MinIO bucket');
+      throw new InternalServerErrorException("Failed to access MinIO bucket");
     }
   }
 
-  private async signedRequest(options: SignedRequestOptions): Promise<Response> {
+  private async signedRequest(
+    options: SignedRequestOptions,
+  ): Promise<Response> {
     if (!this.accessKey || !this.secretKey) {
-      throw new InternalServerErrorException('MinIO credentials are not configured');
+      throw new InternalServerErrorException(
+        "MinIO credentials are not configured",
+      );
     }
 
     const payload = options.payload ?? Buffer.alloc(0);
@@ -144,27 +170,29 @@ export class MinioService {
     const dateStamp = amzDate.slice(0, 8);
     const host = `${this.endpoint}:${this.port}`;
     const canonicalHeaders = `host:${host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`;
-    const signedHeaders = 'host;x-amz-content-sha256;x-amz-date';
+    const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
 
     const canonicalRequest = [
       options.method,
       options.canonicalUri,
-      '',
+      "",
       canonicalHeaders,
       signedHeaders,
       payloadHash,
-    ].join('\n');
+    ].join("\n");
 
     const credentialScope = `${dateStamp}/${this.region}/s3/aws4_request`;
     const stringToSign = [
-      'AWS4-HMAC-SHA256',
+      "AWS4-HMAC-SHA256",
       amzDate,
       credentialScope,
       this.sha256Hex(canonicalRequest),
-    ].join('\n');
+    ].join("\n");
 
     const signingKey = this.getSigningKey(dateStamp);
-    const signature = createHmac('sha256', signingKey).update(stringToSign).digest('hex');
+    const signature = createHmac("sha256", signingKey)
+      .update(stringToSign)
+      .digest("hex");
 
     const authorization =
       `AWS4-HMAC-SHA256 Credential=${this.accessKey}/${credentialScope}, ` +
@@ -174,24 +202,24 @@ export class MinioService {
       method: options.method,
       headers: {
         host,
-        'x-amz-content-sha256': payloadHash,
-        'x-amz-date': amzDate,
+        "x-amz-content-sha256": payloadHash,
+        "x-amz-date": amzDate,
         authorization,
-        ...(options.contentType ? { 'content-type': options.contentType } : {}),
+        ...(options.contentType ? { "content-type": options.contentType } : {}),
       },
-      body: options.method === 'PUT' ? new Uint8Array(payload) : undefined,
+      body: options.method === "PUT" ? new Uint8Array(payload) : undefined,
     });
   }
 
   private baseUrl(): string {
-    return `${this.useSSL ? 'https' : 'http'}://${this.endpoint}:${this.port}`;
+    return `${this.useSSL ? "https" : "http"}://${this.endpoint}:${this.port}`;
   }
 
   private encodePath(pathValue: string): string {
     return pathValue
-      .split('/')
+      .split("/")
       .map((segment) => encodeURIComponent(segment))
-      .join('/');
+      .join("/");
   }
 
   private encodeQuery(value: string): string {
@@ -205,21 +233,26 @@ export class MinioService {
       return MinioService.DEFAULT_SIGNED_URL_TTL_SECONDS;
     }
 
-    return Math.min(Math.floor(parsed), MinioService.MAX_SIGNED_URL_TTL_SECONDS);
+    return Math.min(
+      Math.floor(parsed),
+      MinioService.MAX_SIGNED_URL_TTL_SECONDS,
+    );
   }
 
   private sha256Hex(input: string | Buffer): string {
-    return createHash('sha256').update(input).digest('hex');
+    return createHash("sha256").update(input).digest("hex");
   }
 
   private getAmzDate(): string {
-    return new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
+    return new Date().toISOString().replace(/[:-]|\.\d{3}/g, "");
   }
 
   private getSigningKey(dateStamp: string): Buffer {
-    const kDate = createHmac('sha256', `AWS4${this.secretKey}`).update(dateStamp).digest();
-    const kRegion = createHmac('sha256', kDate).update(this.region).digest();
-    const kService = createHmac('sha256', kRegion).update('s3').digest();
-    return createHmac('sha256', kService).update('aws4_request').digest();
+    const kDate = createHmac("sha256", `AWS4${this.secretKey}`)
+      .update(dateStamp)
+      .digest();
+    const kRegion = createHmac("sha256", kDate).update(this.region).digest();
+    const kService = createHmac("sha256", kRegion).update("s3").digest();
+    return createHmac("sha256", kService).update("aws4_request").digest();
   }
 }
