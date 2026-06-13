@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 
 /** B11: restrict ranker to known values; ranker_v2 is a placeholder (same algorithm as v1) */
 export const VALID_RANKERS = ['ranker_v1', 'ranker_v2'] as const;
@@ -19,4 +19,11 @@ export class RecommendQueryDto {
   @IsOptional()
   @IsIn(VALID_RANKERS)
   ranker?: ValidRanker;
+
+  @ApiPropertyOptional({ example: false, description: '管理员可开启，返回内部打分 debugSignals' })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true' || value === '1')
+  @IsBoolean()
+  debug?: boolean;
 }
+
