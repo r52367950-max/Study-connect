@@ -1,5 +1,5 @@
 import { Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
-import { MaterialStatus, UserStatus } from '@prisma/client';
+import { FileSafetyStatus, FileScanJobStatus, MaterialStatus, UserStatus } from '@prisma/client';
 import { PrismaService } from '../../infra';
 
 @Injectable()
@@ -42,6 +42,64 @@ export class AdminService {
       total,
       items,
     };
+  }
+
+
+  async getFailedFileScans(page: number, pageSize: number) {
+    const skip = (page - 1) * pageSize;
+    const where = { status: { in: [FileScanJobStatus.FAILED, FileScanJobStatus.DEAD_LETTER] } };
+
+    const [items, total] = await Promise.all([
+      this.prisma.fileScanJob.findMany({
+        where,
+        orderBy: [{ failedAt: 'desc' }, { updatedAt: 'desc' }],
+        skip,
+        take: pageSize,
+        select: {
+          id: true,
+          materialId: true,
+          fileKey: true,
+          status: true,
+          attempts: true,
+          lastError: true,
+          scheduledAt: true,
+          nextRunAt: true,
+          lockedBy: true,
+          lockedAt: true,
+          failedAt: true,
+          updatedAt: true,
+          material: { select: { title: true, fileSafetyStatus: true, status: true } },
+        },
+      }),
+      this.prisma.fileScanJob.count({ where }),
+    ]);
+
+    return { page, pageSize, total, items };
+  }
+
+  async retryFileScan(jobId: string) {
+    try {
+      return await this.prisma.fileScanJob.update({
+        where: { id: jobId },
+        data: {
+          status: FileScanJobStatus.PENDING,
+          attempts: 0,
+          lastError: null,
+          scheduledAt: new Date(),
+          nextRunAt: new Date(),
+          lockedBy: null,
+          lockedAt: null,
+          failedAt: null,
+          material: { update: { fileSafetyStatus: FileSafetyStatus.SCANNING } },
+        },
+        select: { id: true, materialId: true, status: true, attempts: true, lastError: true, scheduledAt: true, nextRunAt: true },
+      });
+    } catch (error) {
+      if (this.isRecordNotFoundError(error)) {
+        throw new NotFoundException('File scan job not found');
+      }
+      throw error;
+    }
   }
 
   async approveMaterial(materialId: string, adminId: string) {

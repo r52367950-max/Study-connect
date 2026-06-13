@@ -5,10 +5,13 @@ class PrismaMock {
   job: any = null;
   materialStatus: string | null = null;
   fileScanJob = {
-    upsert: async ({ create }: any) => { this.job = { id: 'j1', attempts: 0, ...create }; },
+    upsert: async ({ create }: any) => { this.job = { id: 'j1', attempts: 0, nextRunAt: new Date(), ...create }; },
     findMany: async () => (this.job ? [this.job] : []),
+    updateMany: async ({ data }: any) => { this.job = { ...this.job, ...data }; return { count: 1 }; },
+    findUnique: async () => this.job,
     update: async ({ data }: any) => { this.job = { ...this.job, ...data }; return this.job; },
   };
+  $transaction<T>(task: (tx: this) => Promise<T>): Promise<T> { return task(this); }
   material = { update: async ({ data }: any) => { this.materialStatus = data.fileSafetyStatus; } };
 }
 
