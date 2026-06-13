@@ -1,6 +1,11 @@
 import { Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
-import { FileSafetyStatus, FileScanJobStatus, MaterialStatus, UserStatus } from '@prisma/client';
+import { MaterialStatus, Prisma, UserStatus } from '@prisma/client';
 import { PrismaService } from '../../infra';
+
+type AuditContext = {
+  ip?: string;
+  userAgent?: string;
+};
 
 @Injectable()
 export class AdminService {
@@ -44,81 +49,123 @@ export class AdminService {
     };
   }
 
-  async getMaterialScanDetails(materialId: string) {
-    const material = await this.prisma.material.findUnique({
-      where: { id: materialId },
-      select: {
-        id: true,
-        title: true,
-        fileSafetyStatus: true,
-        fileScanJob: {
+  async getAuditLogs(query: { targetId?: string; adminId?: string; page: number; pageSize: number }) {
+    const skip = (query.page - 1) * query.pageSize;
+    const where: Prisma.AdminAuditLogWhereInput = {
+      ...(query.targetId ? { targetId: query.targetId } : {}),
+      ...(query.adminId ? { adminId: query.adminId } : {}),
+    };
+
+    const [items, total] = await Promise.all([
+      this.prisma.adminAuditLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: query.pageSize,
+      }),
+      this.prisma.adminAuditLog.count({ where }),
+    ]);
+
+    return {
+      page: query.page,
+      pageSize: query.pageSize,
+      total,
+      items,
+    };
+  }
+
+  async approveMaterial(materialId: string, adminId: string, context: AuditContext = {}) {
+    return this.updateMaterialReview(
+      materialId,
+      {
+        status: MaterialStatus.APPROVED,
+        reviewComment: 'Approved',
+      },
+      {
+        adminId,
+        action: 'MATERIAL_APPROVE',
+        reason: null,
+        ...context,
+      },
+    );
+  }
+
+  async offlineMaterial(materialId: string, adminId: string, reviewComment?: string, context: AuditContext = {}) {
+    const businessComment = reviewComment?.trim() || 'Offline';
+    return this.updateMaterialReview(
+      materialId,
+      {
+        status: MaterialStatus.OFFLINE,
+        reviewComment: businessComment,
+      },
+      {
+        adminId,
+        action: 'MATERIAL_OFFLINE',
+        reason: businessComment,
+        ...context,
+      },
+    );
+  }
+
+  async rejectMaterial(materialId: string, reason: string, adminId: string, context: AuditContext = {}) {
+    return this.updateMaterialReview(
+      materialId,
+      {
+        status: MaterialStatus.REJECTED,
+        reviewComment: reason,
+      },
+      {
+        adminId,
+        action: 'MATERIAL_REJECT',
+        reason,
+        ...context,
+      },
+    );
+  }
+
+  async banUser(userId: string, adminId: string, context: AuditContext = {}) {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const before = await tx.user.findUnique({
+          where: { id: userId },
+          select: { id: true, status: true, tokenVersion: true },
+        });
+
+        if (!before) {
+          throw this.createRecordNotFoundError();
+        }
+
+        const updated = await tx.user.update({
+          where: { id: userId },
+          data: {
+            status: UserStatus.BANNED,
+            tokenVersion: { increment: 1 },
+          },
           select: {
             id: true,
             status: true,
-            attempts: true,
-            lastError: true,
-            scheduledAt: true,
-            updatedAt: true,
-            reports: {
-              orderBy: { createdAt: 'desc' },
-              take: 10,
-              select: {
-                id: true,
-                verdict: true,
-                engine: true,
-                engineVersion: true,
-                signature: true,
-                riskReasons: true,
-                scanDurationMs: true,
-                rawSummary: true,
-                createdAt: true,
-              },
-            },
+            tokenVersion: true,
           },
-        },
-      },
-    });
+        });
 
-    if (!material) {
-      throw new NotFoundException('Material not found');
-    }
+        await tx.adminAuditLog.create({
+          data: {
+            adminId,
+            action: 'USER_BAN',
+            targetType: 'USER',
+            targetId: userId,
+            before,
+            after: updated,
+            reason: null,
+            ip: context.ip,
+            userAgent: context.userAgent,
+          },
+        });
 
-    return material;
-  }
-
-  async approveMaterial(materialId: string, adminId: string) {
-    return this.updateMaterialReview(materialId, {
-      status: MaterialStatus.APPROVED,
-      reviewComment: `Approved by ${adminId}`,
-    });
-  }
-
-  async offlineMaterial(materialId: string, adminId: string, reviewComment?: string) {
-    return this.updateMaterialReview(materialId, {
-      status: MaterialStatus.OFFLINE,
-      reviewComment: reviewComment?.trim() || `Offline by ${adminId}`,
-    });
-  }
-
-  async rejectMaterial(materialId: string, reason: string, adminId: string) {
-    return this.updateMaterialReview(materialId, {
-      status: MaterialStatus.REJECTED,
-      reviewComment: `[${adminId}] ${reason}`,
-    });
-  }
-
-  async banUser(userId: string) {
-    try {
-      return await this.prisma.user.update({
-        where: { id: userId },
-        data: {
-          status: UserStatus.BANNED,
-          tokenVersion: { increment: 1 },
-        },
-        select: {
-          id: true,
-          status: true,
-        },
+        return {
+          id: updated.id,
+          status: updated.status,
+        };
       });
     } catch (error) {
       if (this.isRecordNotFoundError(error)) {
@@ -131,20 +178,48 @@ export class AdminService {
   private async updateMaterialReview(
     materialId: string,
     data: { status: MaterialStatus; reviewComment: string },
+    audit: { adminId: string; action: string; reason: string | null; ip?: string; userAgent?: string },
   ) {
     try {
-      return await this.prisma.material.update({
-        where: { id: materialId },
-        data: {
-          status: data.status,
-          reviewComment: data.reviewComment,
-        },
-        select: {
-          id: true,
-          status: true,
-          reviewComment: true,
-          updatedAt: true,
-        },
+      return await this.prisma.$transaction(async (tx) => {
+        const before = await tx.material.findUnique({
+          where: { id: materialId },
+          select: { id: true, status: true, reviewComment: true },
+        });
+
+        if (!before) {
+          throw this.createRecordNotFoundError();
+        }
+
+        const updated = await tx.material.update({
+          where: { id: materialId },
+          data: {
+            status: data.status,
+            reviewComment: data.reviewComment,
+          },
+          select: {
+            id: true,
+            status: true,
+            reviewComment: true,
+            updatedAt: true,
+          },
+        });
+
+        await tx.adminAuditLog.create({
+          data: {
+            adminId: audit.adminId,
+            action: audit.action,
+            targetType: 'MATERIAL',
+            targetId: materialId,
+            before,
+            after: updated,
+            reason: audit.reason,
+            ip: audit.ip,
+            userAgent: audit.userAgent,
+          },
+        });
+
+        return updated;
       });
     } catch (error) {
       this.logger.error(
@@ -158,6 +233,10 @@ export class AdminService {
 
       throw new InternalServerErrorException('Failed to update material review');
     }
+  }
+
+  private createRecordNotFoundError() {
+    return { code: 'P2025', message: 'Record to update not found.' };
   }
 
   private isRecordNotFoundError(error: unknown): boolean {

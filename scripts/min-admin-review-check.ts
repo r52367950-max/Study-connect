@@ -36,6 +36,7 @@ type DbMaterial = {
 class PrismaServiceMock {
   private users: DbUser[] = [];
   private materials: DbMaterial[] = [];
+  private auditLogs: unknown[] = [];
 
   user = {
     findFirst: async ({ where }: { where: { OR: Array<{ email?: string; username?: string }> } }) => {
@@ -144,6 +145,11 @@ class PrismaServiceMock {
       return this.materials.filter((m) => m.status === where.status).length;
     },
 
+    findUnique: async ({ where, select }: { where: { id: string }; select: Record<string, boolean> }) => {
+      const material = this.materials.find((m) => m.id === where.id);
+      return material ? this.pick(material, select) : null;
+    },
+
     update: async ({
       where,
       data,
@@ -163,6 +169,19 @@ material.reviewComment = data.reviewComment ?? null;
       return this.pick(material, select);
     },
   };
+
+  adminAuditLog = {
+    create: async ({ data }: { data: unknown }) => {
+      this.auditLogs.push(data);
+      return data;
+    },
+    findMany: async () => this.auditLogs,
+    count: async () => this.auditLogs.length,
+  };
+
+  async $transaction<T>(callback: (tx: this) => Promise<T>): Promise<T> {
+    return callback(this);
+  }
 
   setUserRole(email: string, role: UserRole): void {
     const user = this.users.find((u) => u.email === email);

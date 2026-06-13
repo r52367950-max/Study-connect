@@ -9,6 +9,7 @@ import { UserRole } from '@prisma/client';
 import { Request } from 'express';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RateLimit } from '../../common/rate-limit.decorator';
+import { AuditLogsQueryDto } from './dto/audit-logs-query.dto';
 import { OfflineMaterialDto } from './dto/offline-material.dto';
 import { PendingMaterialsQueryDto } from './dto/pending-materials-query.dto';
 import { RejectMaterialDto } from './dto/reject-material.dto';
@@ -30,6 +31,17 @@ const adminIdParam = new ParseUUIDPipe({ errorHttpStatusCode: HttpStatus.NOT_FOU
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
+  @Get('audit-logs')
+  @ApiOperation({ summary: 'Query admin audit logs by targetId or adminId' })
+  getAuditLogs(@Query() query: AuditLogsQueryDto) {
+    return this.adminService.getAuditLogs({
+      targetId: query.targetId,
+      adminId: query.adminId,
+      page: query.page ?? 1,
+      pageSize: query.pageSize ?? 20,
+    });
+  }
+
   @Get('materials/pending')
   @ApiOperation({ summary: 'List pending materials with pagination' })
   getPending(@Query() query: PendingMaterialsQueryDto) {
@@ -49,30 +61,36 @@ export class AdminController {
       example: {
         id: 'uuid',
         status: 'APPROVED',
-        reviewComment: 'Approved by <admin-id>',
+        reviewComment: 'Approved',
       },
     },
   })
   approve(@Param('id', adminIdParam) id: string, @Req() req: Request) {
-    return this.adminService.approveMaterial(id, req.user.id);
+    return this.adminService.approveMaterial(id, req.user.id, this.getAuditContext(req));
   }
-
 
   @Post('materials/:id/offline')
   @ApiOperation({ summary: 'Offline one material' })
   offline(@Param('id', adminIdParam) id: string, @Body() dto: OfflineMaterialDto, @Req() req: Request) {
-    return this.adminService.offlineMaterial(id, req.user.id, dto.reviewComment);
+    return this.adminService.offlineMaterial(id, req.user.id, dto.reviewComment, this.getAuditContext(req));
   }
 
   @Post('materials/:id/reject')
   @ApiOperation({ summary: 'Reject one material with reason' })
   reject(@Param('id', adminIdParam) id: string, @Body() dto: RejectMaterialDto, @Req() req: Request) {
-    return this.adminService.rejectMaterial(id, dto.reason, req.user.id);
+    return this.adminService.rejectMaterial(id, dto.reason, req.user.id, this.getAuditContext(req));
   }
 
   @Post('users/:id/ban')
   @ApiOperation({ summary: 'Ban one user and invalidate active tokens immediately' })
-  banUser(@Param('id', adminIdParam) id: string) {
-    return this.adminService.banUser(id);
+  banUser(@Param('id', adminIdParam) id: string, @Req() req: Request) {
+    return this.adminService.banUser(id, req.user.id, this.getAuditContext(req));
+  }
+
+  private getAuditContext(req: Request) {
+    return {
+      ip: req.ip,
+      userAgent: req.get('user-agent'),
+    };
   }
 }

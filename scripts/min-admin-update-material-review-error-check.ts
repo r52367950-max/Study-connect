@@ -3,12 +3,10 @@ import { InternalServerErrorException, Logger, NotFoundException } from '@nestjs
 import { MaterialStatus } from '@prisma/client';
 import { AdminService } from '../src/modules/admin/admin.service';
 
-function createServiceWithUpdateError(errorToThrow: unknown) {
+function createServiceWithTransactionError(errorToThrow: unknown) {
   const prismaMock = {
-    material: {
-      update: async () => {
-        throw errorToThrow;
-      },
+    $transaction: async () => {
+      throw errorToThrow;
     },
   };
 
@@ -25,26 +23,42 @@ async function run(): Promise<void> {
   };
 
   try {
-    const notFoundService = createServiceWithUpdateError({ code: 'P2025', message: 'Record to update not found.' });
+    const notFoundService = createServiceWithTransactionError({ code: 'P2025', message: 'Record to update not found.' });
 
     await assert.rejects(
-      (notFoundService as unknown as { updateMaterialReview: Function }).updateMaterialReview('missing-id', {
-        status: MaterialStatus.APPROVED,
-        reviewComment: 'Approved by admin',
-      }),
+      (notFoundService as unknown as { updateMaterialReview: Function }).updateMaterialReview(
+        'missing-id',
+        {
+          status: MaterialStatus.APPROVED,
+          reviewComment: 'Approved',
+        },
+        {
+          adminId: crypto.randomUUID(),
+          action: 'MATERIAL_APPROVE',
+          reason: null,
+        },
+      ),
       (error: unknown) => {
         assert.ok(error instanceof NotFoundException);
         return true;
       },
     );
 
-    const dbFailureService = createServiceWithUpdateError(new Error('database connection lost'));
+    const dbFailureService = createServiceWithTransactionError(new Error('database connection lost'));
 
     await assert.rejects(
-      (dbFailureService as unknown as { updateMaterialReview: Function }).updateMaterialReview('material-1', {
-        status: MaterialStatus.REJECTED,
-        reviewComment: 'rejected',
-      }),
+      (dbFailureService as unknown as { updateMaterialReview: Function }).updateMaterialReview(
+        'material-1',
+        {
+          status: MaterialStatus.REJECTED,
+          reviewComment: 'rejected',
+        },
+        {
+          adminId: crypto.randomUUID(),
+          action: 'MATERIAL_REJECT',
+          reason: 'rejected',
+        },
+      ),
       (error: unknown) => {
         assert.ok(error instanceof InternalServerErrorException);
         return true;
