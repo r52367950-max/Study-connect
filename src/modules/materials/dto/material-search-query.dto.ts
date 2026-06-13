@@ -1,16 +1,25 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { ApiPropertyOptional } from "@nestjs/swagger";
+import { MaterialKind } from "@prisma/client";
+import { Transform } from "class-transformer";
+import {
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from "class-validator";
 
 export enum MaterialSort {
-  LATEST = 'latest',
-  RELEVANCE = 'relevance',
-  DOWNLOADS = 'downloads',
-  RATING = 'rating',
+  LATEST = "latest",
+  RELEVANCE = "relevance",
+  DOWNLOADS = "downloads",
+  RATING = "rating",
 }
 
 export class MaterialSearchQueryDto {
-  @ApiPropertyOptional({ description: 'Keyword search in title/description' })
+  @ApiPropertyOptional({ description: "Keyword search in title/description" })
   @IsOptional()
   @IsString()
   @MaxLength(100)
@@ -34,9 +43,19 @@ export class MaterialSearchQueryDto {
   @MaxLength(50)
   subject?: string;
 
+  @ApiPropertyOptional({
+    enum: MaterialKind,
+    description: "Structured material type filter",
+  })
+  @IsOptional()
+  @IsEnum(MaterialKind)
+  kind?: MaterialKind;
+
   @ApiPropertyOptional({ example: 2024 })
   @IsOptional()
-  @Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)))
+  @Transform(({ value }) =>
+    value === undefined || value === "" ? undefined : Number(value),
+  )
   @IsInt()
   @Min(1900)
   @Max(2100)
@@ -51,7 +70,8 @@ export class MaterialSearchQueryDto {
   @ApiPropertyOptional({
     enum: MaterialSort,
     default: MaterialSort.LATEST,
-    description: 'Sort mode. `rating` means higher average score first, then rating count, then newest createdAt.',
+    description:
+      "Sort mode. `rating` means higher average score first, then rating count, then newest createdAt.",
   })
   @IsOptional()
   @IsEnum(MaterialSort)
@@ -59,7 +79,9 @@ export class MaterialSearchQueryDto {
 
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()
-  @Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)))
+  @Transform(({ value }) =>
+    value === undefined || value === "" ? undefined : Number(value),
+  )
   @IsInt()
   @Min(1)
   @Max(1000)
@@ -67,7 +89,9 @@ export class MaterialSearchQueryDto {
 
   @ApiPropertyOptional({ default: 10, maximum: 50 })
   @IsOptional()
-  @Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)))
+  @Transform(({ value }) =>
+    value === undefined || value === "" ? undefined : Number(value),
+  )
   @IsInt()
   @Min(1)
   @Max(50)

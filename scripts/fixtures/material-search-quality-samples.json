@@ -1,0 +1,27 @@
+[
+  {
+    "query": "数学 六年级 模拟卷",
+    "normalized": {
+      "subject": "数学",
+      "stage": "小学",
+      "grade": "六年级",
+      "kind": "MOCK"
+    },
+    "positiveTitleIncludes": ["数学", "六年级", "模拟"]
+  },
+  {
+    "query": "小升初 真题",
+    "normalized": { "stage": "小学", "grade": "六年级", "kind": "EXAM" },
+    "positiveTitleIncludes": ["小升初", "真题"]
+  },
+  {
+    "query": "math 6年级 试卷",
+    "normalized": {
+      "subject": "数学",
+      "stage": "小学",
+      "grade": "六年级",
+      "kind": "EXAM"
+    },
+    "positiveTitleIncludes": ["数学", "六年级"]
+  }
+]
