@@ -125,7 +125,7 @@ export class AuthService {
     const identifier = dto.email
       ? dto.email.toLowerCase()
       : normalizePhone(dto.phone!);
-    const lock = this.rateLimitService.checkLoginLock(
+    const lock = await this.rateLimitService.checkLoginLock(
       this.rateLimitService.buildLoginLockKey(identifier, ipAddress),
     );
     if (lock.locked) {
@@ -150,13 +150,13 @@ export class AuthService {
     const userStatus = user?.status ?? UserStatus.ACTIVE;
     if (!user || userStatus === UserStatus.BANNED) {
       // Avoid leaking which side failed; record + throw same error
-      this.recordLoginFailure(identifier, ipAddress);
+      await this.recordLoginFailure(identifier, ipAddress);
       throw new UnauthorizedException('Invalid credentials');
     }
 
     if (dto.password) {
       if (!(await this.verifyPassword(dto.password, user.passwordHash))) {
-        this.recordLoginFailure(identifier, ipAddress);
+        await this.recordLoginFailure(identifier, ipAddress);
         throw new UnauthorizedException('Invalid credentials');
       }
     } else {
@@ -169,12 +169,12 @@ export class AuthService {
           code: dto.otpCode!,
         });
       } catch (err) {
-        this.recordLoginFailure(identifier, ipAddress);
+        await this.recordLoginFailure(identifier, ipAddress);
         throw err;
       }
     }
 
-    this.rateLimitService.recordLoginSuccess(identifier, ipAddress);
+    await this.rateLimitService.recordLoginSuccess(identifier, ipAddress);
 
     const profile: AuthUser = {
       id: user.id,
@@ -296,8 +296,8 @@ export class AuthService {
     });
   }
 
-  private recordLoginFailure(identifier: string, ip: string): void {
-    this.rateLimitService.recordLoginFailure({
+  private async recordLoginFailure(identifier: string, ip: string): Promise<void> {
+    await this.rateLimitService.recordLoginFailure({
       identifier,
       ip,
       failureWindowMs: this.getNumber('RATE_LIMIT_LOGIN_FAILURE_WINDOW_MS', 60_000),
