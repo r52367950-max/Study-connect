@@ -15,7 +15,7 @@ import { ErrorState } from '@/components/shared/error-state'
 const PAGE_SIZE = 20
 
 interface MaterialInfiniteListProps {
-  params?: Omit<MaterialSearchParams, 'page' | 'pageSize'>
+  params?: Omit<MaterialSearchParams, 'page' | 'pageSize' | 'cursor'>
   emptyVariant?: EmptyStateVariant
   emptyTitle?: string
   emptyDescription?: string
@@ -40,11 +40,14 @@ export function MaterialInfiniteList({
     isFetchingNextPage,
   } = useInfiniteQuery({
     queryKey: ['materials', params],
-    queryFn: ({ pageParam }) => getMaterials({ ...params, page: pageParam, pageSize: PAGE_SIZE }),
-    initialPageParam: 1,
+    queryFn: ({ pageParam }) => getMaterials({ ...params, cursor: pageParam, pageSize: PAGE_SIZE }),
+    initialPageParam: '',
     getNextPageParam: (lastPage) => {
+      if (typeof lastPage.hasMore === 'boolean') {
+        return lastPage.hasMore ? (lastPage.nextCursor ?? undefined) : undefined
+      }
       const loaded = lastPage.page * lastPage.pageSize
-      return loaded < lastPage.total ? lastPage.page + 1 : undefined
+      return lastPage.total && loaded < lastPage.total ? String(lastPage.page + 1) : undefined
     },
   })
 

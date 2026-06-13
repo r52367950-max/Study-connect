@@ -14,6 +14,8 @@ import { apiClient } from './client'
 export async function getMaterials(
   params: MaterialSearchParams = {},
 ): Promise<PaginatedResponse<MaterialListItem>> {
+  // `params.cursor` opts the backend into seek pagination and may return
+  // `hasMore`/`nextCursor` without forcing a total COUNT.
   const { data } = await apiClient.get<PaginatedResponse<MaterialListItem>>('/materials', {
     params,
   })

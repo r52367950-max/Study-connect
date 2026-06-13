@@ -112,11 +112,13 @@ export class MaterialsService {
     const pageSize = query.pageSize ?? 10;
     const skip = (page - 1) * pageSize;
     const sort = query.sort ?? MaterialSort.LATEST;
+    const cursor = decodeMaterialCursor(query.cursor);
+    const isCursorMode = query.cursor !== undefined;
 
     const where = this.buildApprovedWhere(query);
     const orderBy = this.buildOrderBy(sort, Boolean(query.q));
 
-    if (query.q && query.q.trim() && sort !== MaterialSort.RATING) {
+    if (query.q && query.q.trim() && sort === MaterialSort.RELEVANCE) {
       const q = query.q.trim();
       // `title % q` / `description % q` drive a BitmapOr over the two GIN trigram
       // indexes; ordering still ranks by exact similarity() on the matched rows only.
@@ -212,6 +214,7 @@ export class MaterialsService {
       // C2: when `q` is supplied, keep the keyword (trigram) filter — the keyword branch above only
       //     runs for non-RATING sorts, so without this `?q=...&sort=rating` would ignore the keyword.
       const q = query.q && query.q.trim() ? query.q.trim() : null;
+      const ratingCursor = cursor && cursor.sort === MaterialSort.RATING ? cursor : null;
       const ratingRows = await this.runWithTrgmThreshold(this.prisma.$queryRaw<Array<{
         id: string;
         title: string;
@@ -235,7 +238,7 @@ export class MaterialsService {
           (CASE WHEN m.rating_count > 0 THEN m.rating_sum::double precision / m.rating_count END) AS avg_score,
           m.rating_count AS rating_count,
           m.download_count AS download_count,
-          COUNT(*) OVER()::bigint AS total_count
+          ${isCursorMode ? Prisma.sql`NULL::bigint` : Prisma.sql`COUNT(*) OVER()::bigint`} AS total_count
         FROM materials m
         WHERE m.status = 'APPROVED'
           AND m.visibility = 'PUBLIC'
@@ -246,15 +249,29 @@ export class MaterialsService {
           AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
           AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
           AND (${q}::text IS NULL OR m.title % ${q} OR m.description % ${q})
-        ORDER BY avg_score DESC NULLS LAST, rating_count DESC, m.created_at DESC
-        LIMIT ${pageSize} OFFSET ${skip}
+          AND (
+            ${ratingCursor ? Number(ratingCursor.avgScore ?? -1) : null}::double precision IS NULL
+            OR ROW(
+              COALESCE((CASE WHEN m.rating_count > 0 THEN m.rating_sum::double precision / m.rating_count END), -1::double precision),
+              m.rating_count,
+              m.created_at,
+              m.id
+            ) < ROW(
+              ${ratingCursor ? Number(ratingCursor.avgScore ?? -1) : null}::double precision,
+              ${ratingCursor ? Number(ratingCursor.ratingCount ?? 0) : null}::int,
+              ${ratingCursor ? new Date(String(ratingCursor.createdAt)) : null}::timestamp,
+              ${ratingCursor ? String(ratingCursor.id) : null}::text
+            )
+          )
+        ORDER BY avg_score DESC NULLS LAST, rating_count DESC, m.created_at DESC, m.id DESC
+        LIMIT ${isCursorMode ? pageSize + 1 : pageSize} OFFSET ${isCursorMode ? 0 : skip}
       `));
 
       // C3: COUNT(*) OVER() only yields a value on non-empty pages. For an out-of-range
       // OFFSET (skip > 0 with no rows) fall back to a dedicated count so pagination metadata
       // stays correct instead of collapsing to total: 0 while earlier pages have matches.
-      let total = ratingRows[0] ? Number(ratingRows[0].total_count) : 0;
-      if (ratingRows.length === 0 && skip > 0) {
+      let total = isCursorMode ? undefined : (ratingRows[0] ? Number(ratingRows[0].total_count) : 0);
+      if (!isCursorMode && ratingRows.length === 0 && skip > 0) {
         const countRows = await this.runWithTrgmThreshold(this.prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`
           SELECT COUNT(*)::bigint AS total
           FROM materials m
@@ -271,64 +288,8 @@ export class MaterialsService {
         total = countRows[0] ? Number(countRows[0].total) : 0;
       }
 
-      return {
-        page,
-        pageSize,
-        total,
-        items: ratingRows.map((item) => ({
-          id: item.id,
-          title: item.title,
-          description: item.description,
-          stage: item.stage,
-          grade: item.grade,
-          subject: item.subject,
-          kind: item.kind,
-          year: item.year,
-          region: item.region,
-          visibility: item.visibility,
-          createdAt: item.createdAt,
-          avg_score: item.avg_score !== null ? Number(item.avg_score) : null,
-          download_count: Number(item.download_count),
-        })),
-      };
-    }
-
-    // Perf: download/rating figures come from the denormalized counters on the row
-    // itself. The previous `_count: { downloads }` select made Prisma LEFT JOIN
-    // `(SELECT material_id, COUNT(*) FROM downloads GROUP BY material_id)` — a full
-    // aggregation of the downloads table on every page — and a second query
-    // (rating.groupBy) fetched the page's averages.
-    const [items, total] = await Promise.all([
-      this.prisma.material.findMany({
-        where,
-        skip,
-        take: pageSize,
-        orderBy,
-        select: {
-          id: true,
-          title: true,
-          description: true,
-          stage: true,
-          grade: true,
-          subject: true,
-          kind: true,
-          year: true,
-          region: true,
-          visibility: true,
-          createdAt: true,
-          downloadCount: true,
-          ratingSum: true,
-          ratingCount: true,
-        },
-      }),
-      this.prisma.material.count({ where }),
-    ]);
-
-    return {
-      page,
-      pageSize,
-      total,
-      items: items.map((item) => ({
+      const pageRows = isCursorMode ? ratingRows.slice(0, pageSize) : ratingRows;
+      const items = pageRows.map((item) => ({
         id: item.id,
         title: item.title,
         description: item.description,
@@ -340,9 +301,89 @@ export class MaterialsService {
         region: item.region,
         visibility: item.visibility,
         createdAt: item.createdAt,
-        avg_score: averageFromCounters(item.ratingSum, item.ratingCount),
-        download_count: item.downloadCount ?? 0,
-      })),
+        avg_score: item.avg_score !== null ? Number(item.avg_score) : null,
+        rating_count: Number(item.rating_count ?? 0),
+        download_count: Number(item.download_count),
+      }));
+      const lastItem = items.at(-1);
+      return {
+        page,
+        pageSize,
+        total,
+        hasMore: isCursorMode ? ratingRows.length > pageSize : skip + items.length < (total ?? 0),
+        nextCursor: lastItem
+          ? encodeMaterialCursor({
+              sort: MaterialSort.RATING,
+              avgScore: lastItem.avg_score,
+              ratingCount: lastItem.rating_count,
+              createdAt: lastItem.createdAt,
+              id: lastItem.id,
+            })
+          : null,
+        items,
+      };
+    }
+
+    // Perf: download/rating figures come from the denormalized counters on the row
+    // itself. The previous `_count: { downloads }` select made Prisma LEFT JOIN
+    // `(SELECT material_id, COUNT(*) FROM downloads GROUP BY material_id)` — a full
+    // aggregation of the downloads table on every page — and a second query
+    // (rating.groupBy) fetched the page's averages.
+    const seekWhere = cursor ? this.buildCursorWhere(sort, cursor) : undefined;
+    const items = await this.prisma.material.findMany({
+      where: seekWhere ? { AND: [where, seekWhere] } : where,
+      skip: isCursorMode ? 0 : skip,
+      take: isCursorMode ? pageSize + 1 : pageSize,
+      orderBy,
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        stage: true,
+        grade: true,
+        subject: true,
+        kind: true,
+        year: true,
+        region: true,
+        visibility: true,
+        createdAt: true,
+        downloadCount: true,
+        ratingSum: true,
+        ratingCount: true,
+      },
+    });
+    const total = isCursorMode ? undefined : await this.prisma.material.count({ where });
+    const pageItems = isCursorMode ? items.slice(0, pageSize) : items;
+    const mappedItems = pageItems.map((item) => ({
+      id: item.id,
+      title: item.title,
+      description: item.description,
+      stage: item.stage,
+      grade: item.grade,
+      subject: item.subject,
+      kind: item.kind,
+      year: item.year,
+      region: item.region,
+      visibility: item.visibility,
+      createdAt: item.createdAt,
+      avg_score: averageFromCounters(item.ratingSum, item.ratingCount),
+      rating_count: item.ratingCount ?? 0,
+      download_count: item.downloadCount ?? 0,
+    }));
+    const lastItem = mappedItems.at(-1);
+
+    return {
+      page,
+      pageSize,
+      total,
+      hasMore: isCursorMode ? items.length > pageSize : skip + mappedItems.length < (total ?? 0),
+      nextCursor: lastItem ? encodeMaterialCursor({
+        sort,
+        downloadCount: lastItem.download_count,
+        createdAt: lastItem.createdAt,
+        id: lastItem.id,
+      }) : null,
+      items: mappedItems,
     };
   }
 
@@ -634,20 +675,46 @@ export class MaterialsService {
     // ({ downloads: { _count: 'desc' } }) made Prisma LEFT JOIN a GROUP BY over the
     // whole downloads table twice (once for ordering, once for the count selection).
     if (sort === MaterialSort.DOWNLOADS) {
-      return [{ downloadCount: 'desc' }, { createdAt: 'desc' }];
+      return [{ downloadCount: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }];
     }
 
     if (sort === MaterialSort.RATING) {
-      return [{ createdAt: 'desc' }];
+      return [{ createdAt: 'desc' }, { id: 'desc' }];
     }
 
     if (sort === MaterialSort.RELEVANCE) {
       return hasKeyword
-        ? [{ downloadCount: 'desc' }, { createdAt: 'desc' }]
-        : [{ createdAt: 'desc' }];
+        ? [{ downloadCount: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }]
+        : [{ createdAt: 'desc' }, { id: 'desc' }];
     }
 
-    return [{ createdAt: 'desc' }];
+    return [{ createdAt: 'desc' }, { id: 'desc' }];
+  }
+
+  private buildCursorWhere(sort: MaterialSort, cursor: MaterialCursor): Prisma.MaterialWhereInput | undefined {
+    if (sort === MaterialSort.DOWNLOADS && cursor.sort === MaterialSort.DOWNLOADS) {
+      const downloadCount = Number(cursor.downloadCount ?? 0);
+      const createdAt = new Date(String(cursor.createdAt));
+      return {
+        OR: [
+          { downloadCount: { lt: downloadCount } },
+          { downloadCount, createdAt: { lt: createdAt } },
+          { downloadCount, createdAt, id: { lt: String(cursor.id) } },
+        ],
+      };
+    }
+
+    if (![MaterialSort.LATEST, MaterialSort.RELEVANCE].includes(sort) || cursor.sort !== sort) {
+      return undefined;
+    }
+
+    const createdAt = new Date(String(cursor.createdAt));
+    return {
+      OR: [
+        { createdAt: { lt: createdAt } },
+        { createdAt, id: { lt: String(cursor.id) } },
+      ],
+    };
   }
 
   /**
@@ -674,4 +741,33 @@ function averageFromCounters(sum: number | null | undefined, count: number | nul
     return null;
   }
   return Number(sum ?? 0) / ratingCount;
+}
+
+type MaterialCursor = {
+  sort: MaterialSort;
+  id: string;
+  createdAt: string | Date;
+  downloadCount?: number;
+  avgScore?: number | null;
+  ratingCount?: number;
+};
+
+function encodeMaterialCursor(cursor: MaterialCursor): string {
+  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
+}
+
+function decodeMaterialCursor(cursor?: string): MaterialCursor | null {
+  if (!cursor) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as Partial<MaterialCursor>;
+    if (!parsed.sort || !parsed.id || !parsed.createdAt) {
+      return null;
+    }
+    return parsed as MaterialCursor;
+  } catch {
+    return null;
+  }
 }

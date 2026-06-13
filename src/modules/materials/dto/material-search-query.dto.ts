@@ -65,6 +65,14 @@ export class MaterialSearchQueryDto {
   @Max(1000)
   page?: number;
 
+  @ApiPropertyOptional({
+    description: 'Opaque cursor returned by the previous response. When present, seek pagination is used; page remains for backward compatibility.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  cursor?: string;
+
   @ApiPropertyOptional({ default: 10, maximum: 50 })
   @IsOptional()
   @Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)))
