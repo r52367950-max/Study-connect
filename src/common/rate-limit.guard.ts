@@ -28,7 +28,7 @@ export class RateLimitGuard implements CanActivate {
     private readonly rateLimitService: RateLimitService,
   ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     if (context.getType() !== 'http') {
       return true;
     }
@@ -45,7 +45,7 @@ export class RateLimitGuard implements CanActivate {
       keyPrefix: 'ip',
     };
 
-    this.assertAllowed(globalRule, `ip:${ip}`, { route, method, ip });
+    await this.assertAllowed(globalRule, `ip:${ip}`, { route, method, ip });
 
     const routeRules =
       this.reflector.getAllAndOverride<RateLimitRule[]>(RATE_LIMIT_RULES_KEY, [
@@ -54,12 +54,12 @@ export class RateLimitGuard implements CanActivate {
       ]) ?? [];
 
     for (const rule of routeRules) {
-      this.assertAllowed(rule, `${rule.keyPrefix ?? 'ip'}:${ip}`, { route, method, ip });
+      await this.assertAllowed(rule, `${rule.keyPrefix ?? 'ip'}:${ip}`, { route, method, ip });
     }
 
     if (method === 'POST' && request.path === '/auth/login') {
       // B3: check pure-IP failure lock first (catches credential stuffing with rotating identifiers)
-      const ipOnlyLock = this.rateLimitService.checkLoginIpOnlyLock(ip);
+      const ipOnlyLock = await this.rateLimitService.checkLoginIpOnlyLock(ip);
       if (ipOnlyLock.locked) {
         throw new HttpException(
           `Too many login failures from this IP, retry in ${Math.ceil(ipOnlyLock.retryAfterMs / 1000)}s`,
@@ -69,7 +69,7 @@ export class RateLimitGuard implements CanActivate {
 
       const identity = this.extractIdentifier(request);
       if (identity) {
-        const lock = this.rateLimitService.checkLoginLock(
+        const lock = await this.rateLimitService.checkLoginLock(
           this.rateLimitService.buildLoginLockKey(identity, ip),
         );
         if (lock.locked) {
@@ -85,7 +85,7 @@ export class RateLimitGuard implements CanActivate {
           windowMs: this.getNumber('RATE_LIMIT_LOGIN_WINDOW_MS', DEFAULT_LOGIN_WINDOW_MS),
         };
 
-        this.assertAllowed(loginRule, `${ip}:${identity}`, { route, method, ip });
+        await this.assertAllowed(loginRule, `${ip}:${identity}`, { route, method, ip });
       }
     }
 
@@ -100,12 +100,12 @@ export class RateLimitGuard implements CanActivate {
     };
   }
 
-  private assertAllowed(
+  private async assertAllowed(
     rule: RateLimitRule,
     key: string,
     context: { route: string; method: string; ip: string },
-  ): void {
-    const result = this.rateLimitService.checkAndConsume({
+  ): Promise<void> {
+    const result = await this.rateLimitService.checkAndConsume({
       ruleName: rule.name,
       key,
       limit: rule.limit,

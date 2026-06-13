@@ -8,7 +8,7 @@ function assert(condition: boolean, message: string): void {
   }
 }
 
-function run(): void {
+async function run(): Promise<void> {
   // ---- S2a: TRUST_PROXY parsing must never enable trust for "off" values ----
   assert(parseTrustProxy(undefined).enabled === false, 'unset TRUST_PROXY should disable trust');
   assert(parseTrustProxy('').enabled === false, 'empty TRUST_PROXY should disable trust');
@@ -63,16 +63,16 @@ function run(): void {
   const stuffSvc = new RateLimitService();
   const attackIp = '198.51.100.50';
   const failOpts = { ip: attackIp, failureWindowMs: 60_000, maxFailures: 100, lockMs: 300_000, ipOnlyMaxFailures: 3 };
-  stuffSvc.recordLoginFailure({ identifier: 'victim-a@example.com', ...failOpts }); // IP fails: 1
-  stuffSvc.recordLoginFailure({ identifier: 'victim-b@example.com', ...failOpts }); // IP fails: 2
-  stuffSvc.recordLoginSuccess('attacker-own@example.com', attackIp); // must NOT reset IP-only counter
+  await stuffSvc.recordLoginFailure({ identifier: 'victim-a@example.com', ...failOpts }); // IP fails: 1
+  await stuffSvc.recordLoginFailure({ identifier: 'victim-b@example.com', ...failOpts }); // IP fails: 2
+  await stuffSvc.recordLoginSuccess('attacker-own@example.com', attackIp); // must NOT reset IP-only counter
   assert(
-    stuffSvc.checkLoginIpOnlyLock(attackIp).locked === false,
+    (await stuffSvc.checkLoginIpOnlyLock(attackIp)).locked === false,
     'IP-only lock should not engage before threshold',
   );
-  stuffSvc.recordLoginFailure({ identifier: 'victim-c@example.com', ...failOpts }); // IP fails: 3 -> lock
+  await stuffSvc.recordLoginFailure({ identifier: 'victim-c@example.com', ...failOpts }); // IP fails: 3 -> lock
   assert(
-    stuffSvc.checkLoginIpOnlyLock(attackIp).locked === true,
+    (await stuffSvc.checkLoginIpOnlyLock(attackIp)).locked === true,
     'successful login must not reset the IP-only failure counter (credential-stuffing bypass)',
   );
   console.log('login-ip-only counter survives success check passed');
@@ -81,7 +81,10 @@ function run(): void {
 }
 
 try {
-  run();
+  void run().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
 } catch (error) {
   console.error(error);
   process.exitCode = 1;
