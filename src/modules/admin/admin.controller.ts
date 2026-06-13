@@ -36,6 +36,12 @@ export class AdminController {
     return this.adminService.getPendingMaterials(query.page ?? 1, query.pageSize ?? 10);
   }
 
+  @Get('materials/:id/scan')
+  @ApiOperation({ summary: 'Get file scan details for one material' })
+  getMaterialScan(@Param('id', adminIdParam) id: string) {
+    return this.adminService.getMaterialScanDetails(id);
+  }
+
   @Post('materials/:id/approve')
   @ApiOperation({ summary: 'Approve one material' })
   @ApiOkResponse({
