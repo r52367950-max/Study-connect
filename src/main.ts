@@ -14,6 +14,7 @@ import {
 } from './common/security/cors-config';
 import { assertSecretStrength } from './common/security/secret-strength';
 import { parseTrustProxy } from './common/security/trust-proxy';
+import { MetricsService } from './modules/metrics/metrics.service';
 
 if (process.env.SENTRY_DSN) {
   Sentry.init({
@@ -50,6 +51,9 @@ async function bootstrap() {
   if (process.env.AUTH_OTP_TEST_BYPASS === 'true') {
     app.get(Logger).warn('OTP test bypass is ACTIVE');
   }
+
+  const metrics = app.get(MetricsService);
+  app.use(createHttpMetricsMiddleware(metrics));
 
   app.use(applySecurityHeaders);
   // gzip JSON responses (negotiated via Accept-Encoding). threshold keeps small
@@ -108,6 +112,27 @@ async function bootstrap() {
   app.enableShutdownHooks();
 
   await app.listen(process.env.PORT ? Number(process.env.PORT) : 3000);
+}
+
+function createHttpMetricsMiddleware(metrics: MetricsService) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const startedAt = process.hrtime.bigint();
+    res.on('finish', () => {
+      const latencySeconds = Number(process.hrtime.bigint() - startedAt) / 1_000_000_000;
+      const route = normalizeMetricsRoute(req);
+      const labels = { method: req.method, route, status: String(res.statusCode) };
+      metrics.increment('http_requests_total', labels);
+      metrics.observe('http_request_duration_seconds', latencySeconds, labels);
+    });
+    next();
+  };
+}
+
+function normalizeMetricsRoute(req: Request): string {
+  const routePath = (req.route as { path?: string } | undefined)?.path;
+  const baseUrl = req.baseUrl ?? '';
+  if (routePath) return `${baseUrl}${routePath}` || '/';
+  return (req.path ?? req.url ?? '/').replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/gi, ':id');
 }
 
 function applySecurityHeaders(req: Request, res: Response, next: NextFunction): void {

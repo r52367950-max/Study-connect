@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { FileSafetyStatus, MaterialKind, MaterialStatus, MaterialVisibility, Prisma } from '@prisma/client';
 import { PrismaService } from '../../infra';
+import { MetricsService } from '../metrics/metrics.service';
 
 export type RecommendUserProfile = {
   id: string;
@@ -46,7 +47,10 @@ export class RecommendationsService {
 
   private readonly schoolDensityCache = new Map<string, { count: number; expiresAt: number }>();
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly metrics?: MetricsService,
+  ) {}
 
   /**
    * Score formula (stage 1 / ranker_v1):
@@ -61,6 +65,7 @@ export class RecommendationsService {
     user: RecommendUserProfile,
     options: { limit?: number; ranker?: string } = {},
   ): Promise<RecommendationItem[]> {
+    const startedAt = process.hrtime.bigint();
     const limit = options.limit ?? DEFAULT_LIMIT;
     const ranker = options.ranker ?? DEFAULT_RANKER;
     const basePhase = this.pickBasePhase(user);
@@ -135,6 +140,8 @@ export class RecommendationsService {
     });
 
     scored.sort((a, b) => b.score - a.score);
+    this.metrics?.increment('recommendations_total', { phase, ranker });
+    this.metrics?.observe('recommendations_duration_seconds', Number(process.hrtime.bigint() - startedAt) / 1_000_000_000, { phase, ranker });
     return scored.slice(0, limit);
   }
 

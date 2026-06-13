@@ -1,4 +1,5 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
+import { MetricsService } from '../modules/metrics/metrics.service';
 
 type CounterState = {
   count: number;
@@ -25,7 +26,7 @@ export class RateLimitService implements OnModuleDestroy {
   private readonly metrics = new Map<string, number>();
   private readonly sweepTimer: NodeJS.Timeout;
 
-  constructor() {
+  constructor(@Optional() private readonly metricsService?: MetricsService) {
     // Counters/locks only get deleted on successful login otherwise; sweep expired
     // entries periodically so the maps cannot grow without bound. unref() keeps the
     // timer from holding the process open (min-* scripts, tests).
@@ -113,6 +114,7 @@ export class RateLimitService implements OnModuleDestroy {
     ipOnlyMaxFailures?: number;
   }): void {
     const now = Date.now();
+    this.metricsService?.increment('login_failures_total');
     for (const key of this.buildLoginLockKeys(input.identifier, input.ip)) {
       const state = this.loginLocks.get(key);
       if (!state || now - state.firstFailureAt > input.failureWindowMs) {
@@ -128,6 +130,7 @@ export class RateLimitService implements OnModuleDestroy {
       state.failures += 1;
       if (state.failures >= input.maxFailures) {
         state.lockUntil = now + input.lockMs;
+        this.metricsService?.increment('login_locks_total', { scope: 'identifier' });
         this.recordLimitHit({
           metricKey: 'rate_limit.rule.auth-login-lock',
           rule: 'auth-login-lock',
@@ -156,6 +159,7 @@ export class RateLimitService implements OnModuleDestroy {
       ipState.failures += 1;
       if (ipState.failures >= ipMaxFailures) {
         ipState.lockUntil = now + input.lockMs;
+        this.metricsService?.increment('login_locks_total', { scope: 'ip' });
         this.recordLimitHit({
           metricKey: 'rate_limit.rule.auth-login-ip-fail',
           rule: 'auth-login-ip-fail',
@@ -211,6 +215,7 @@ export class RateLimitService implements OnModuleDestroy {
     ip: string;
     retryAfterMs: number;
   }): void {
+    this.metricsService?.increment('rate_limit_blocks_total', { rule: input.rule, route: input.route, method: input.method });
     this.metrics.set(input.metricKey, (this.metrics.get(input.metricKey) ?? 0) + 1);
     this.metrics.set('rate_limit.hits.total', (this.metrics.get('rate_limit.hits.total') ?? 0) + 1);
 

@@ -1,12 +1,16 @@
-import { Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { MaterialStatus, UserStatus } from '@prisma/client';
 import { PrismaService } from '../../infra';
+import { MetricsService } from '../metrics/metrics.service';
 
 @Injectable()
 export class AdminService {
   private readonly logger = new Logger(AdminService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly metrics?: MetricsService,
+  ) {}
 
   async getPendingMaterials(page: number, pageSize: number) {
     const skip = (page - 1) * pageSize;
@@ -91,7 +95,7 @@ export class AdminService {
     data: { status: MaterialStatus; reviewComment: string },
   ) {
     try {
-      return await this.prisma.material.update({
+      const result = await this.prisma.material.update({
         where: { id: materialId },
         data: {
           status: data.status,
@@ -104,6 +108,8 @@ export class AdminService {
           updatedAt: true,
         },
       });
+      this.metrics?.increment('material_review_processed_total', { status: data.status });
+      return result;
     } catch (error) {
       this.logger.error(
         `Failed to update material review (materialId=${materialId}, targetStatus=${data.status}, errorType=${this.getErrorType(error)})`,

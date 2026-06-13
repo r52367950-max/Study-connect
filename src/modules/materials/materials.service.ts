@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { FileSafetyStatus, Material, MaterialStatus, MaterialVisibility, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { MinioService, PrismaService } from '../../infra';
@@ -8,6 +8,7 @@ import { MaterialRatingsQueryDto } from './dto/material-ratings-query.dto';
 import { MaterialSearchQueryDto, MaterialSort } from './dto/material-search-query.dto';
 import { UploadFileInput } from './file-upload.type';
 import { FileScanService } from './file-scan.service';
+import { MetricsService } from '../metrics/metrics.service';
 import { sanitizeFilename, stripControlChars } from './upload-security.util';
 
 export type UploadedMaterial = Pick<
@@ -49,6 +50,7 @@ export class MaterialsService {
     private readonly prisma: PrismaService,
     private readonly minioService: MinioService,
     private readonly fileScanService: FileScanService,
+    @Optional() private readonly metrics?: MetricsService,
   ) {}
 
   async createWithFile(params: {
@@ -108,6 +110,7 @@ export class MaterialsService {
   }
 
   async searchApproved(query: MaterialSearchQueryDto) {
+    const searchStartedAt = process.hrtime.bigint();
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 10;
     const skip = (page - 1) * pageSize;
@@ -179,6 +182,7 @@ export class MaterialsService {
         `));
         total = countRows[0] ? Number(countRows[0].total) : 0;
       }
+      this.recordSearchMetrics(searchStartedAt, 'keyword', rows.length);
       return {
         page,
         pageSize,
@@ -271,6 +275,7 @@ export class MaterialsService {
         total = countRows[0] ? Number(countRows[0].total) : 0;
       }
 
+      this.recordSearchMetrics(searchStartedAt, 'rating', ratingRows.length);
       return {
         page,
         pageSize,
@@ -324,6 +329,7 @@ export class MaterialsService {
       this.prisma.material.count({ where }),
     ]);
 
+    this.recordSearchMetrics(searchStartedAt, 'default', items.length);
     return {
       page,
       pageSize,
@@ -344,6 +350,12 @@ export class MaterialsService {
         download_count: item.downloadCount ?? 0,
       })),
     };
+  }
+
+  private recordSearchMetrics(startedAt: bigint, mode: string, resultCount: number): void {
+    this.metrics?.increment('materials_search_total', { mode });
+    this.metrics?.observe('materials_search_duration_seconds', Number(process.hrtime.bigint() - startedAt) / 1_000_000_000, { mode });
+    this.metrics?.observe('materials_search_results', resultCount, { mode }, [0, 1, 5, 10, 25, 50, 100]);
   }
 
   async getApprovedDetail(id: string) {
@@ -465,6 +477,7 @@ export class MaterialsService {
   async listApprovedMaterialRatings(materialId: string, query: MaterialRatingsQueryDto) {
     await this.ensurePublicApprovedMaterial(materialId);
 
+    const searchStartedAt = process.hrtime.bigint();
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 10;
     const skip = (page - 1) * pageSize;

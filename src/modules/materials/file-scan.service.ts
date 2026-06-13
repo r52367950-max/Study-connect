@@ -1,6 +1,7 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { FileSafetyStatus, FileScanJobStatus } from '@prisma/client';
 import { MinioService, PrismaService } from '../../infra';
+import { MetricsService } from '../metrics/metrics.service';
 import { assertUploadFileSecurity, UploadSecurityStatus } from './upload-security.util';
 
 const DEFAULT_SCAN_INTERVAL_MS = 30_000;
@@ -20,6 +21,7 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly minioService: MinioService,
+    @Optional() private readonly metrics?: MetricsService,
   ) {}
 
   onModuleInit(): void {
@@ -38,6 +40,7 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
     if (!(this.prisma as any).fileScanJob?.upsert) {
       return;
     }
+    this.metrics?.increment('file_scan_enqueued_total');
     await this.prisma.fileScanJob.upsert({
       where: { materialId },
       create: { materialId, fileKey, status: FileScanJobStatus.PENDING },
@@ -54,6 +57,13 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
     this.isRunning = true;
     try {
       const now = new Date();
+      if ((this.prisma as any).fileScanJob?.count) {
+        const queueLength = await this.prisma.fileScanJob
+          .count({ where: { status: FileScanJobStatus.PENDING, scheduledAt: { lte: now } } })
+          .catch(() => undefined);
+        if (typeof queueLength === 'number') this.metrics?.setGauge('file_scan_queue_length', queueLength);
+      }
+
       const jobs = await this.prisma.fileScanJob.findMany({
         where: {
           OR: [
@@ -71,6 +81,7 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
       });
 
       for (const job of jobs) {
+        const scanStartedAt = process.hrtime.bigint();
         await this.prisma.fileScanJob.update({ where: { id: job.id }, data: { status: FileScanJobStatus.RUNNING } });
         await this.updateScanStatus(job.materialId, FileSafetyStatus.SCANNING);
         try {
@@ -86,6 +97,8 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
           });
           await this.updateScanStatus(job.materialId, status);
           await this.prisma.fileScanJob.update({ where: { id: job.id }, data: { status: FileScanJobStatus.DONE, lastError: null } });
+          this.metrics?.increment('file_scan_completed_total', { status: 'done' });
+          this.metrics?.observe('file_scan_duration_seconds', Number(process.hrtime.bigint() - scanStartedAt) / 1_000_000_000, { status: 'done' });
         } catch (error) {
           const attempts = job.attempts + 1;
           const message = error instanceof Error ? error.message : String(error);
@@ -115,6 +128,8 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
               scheduledAt: new Date(Date.now() + (terminal ? 0 : this.retryBackoffMs(attempts))),
             },
           });
+          this.metrics?.increment('file_scan_completed_total', { status: terminal ? 'failed' : 'retry' });
+          this.metrics?.observe('file_scan_duration_seconds', Number(process.hrtime.bigint() - scanStartedAt) / 1_000_000_000, { status: terminal ? 'failed' : 'retry' });
           this.logger.warn({ event: 'FILE_SCAN_FAILED', materialId: job.materialId, attempts, terminal, error: message });
         }
       }
