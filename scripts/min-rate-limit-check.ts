@@ -300,7 +300,7 @@ async function run(): Promise<void> {
   await app.init();
   await app.listen(0);
 
-  const rateLimitService = app.get(RateLimitService) as RateLimitService & {
+  const rateLimitService = app.get(RateLimitService) as unknown as {
     logger?: { warn: (message: unknown) => void; log: (message: unknown) => void };
   };
   const capturedLogs: RateLimitLogEvent[] = [];
@@ -426,7 +426,7 @@ async function run(): Promise<void> {
     throw new Error(`upload rate limit check failed, expected 429 got ${upload429 || 'not-hit'}`);
   }
 
-  const authService = app.get(AuthService) as AuthService & {
+  const authService = app.get(AuthService) as unknown as {
     issueAccessToken: (
       user: { id: string; email: string; username: string; role: UserRole },
       tokenVersion: number,
