@@ -3,12 +3,14 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Shield, Check, X, WifiOff, ChevronRight } from 'lucide-react'
+import { Shield, Check, X, WifiOff, ChevronRight, Flag } from 'lucide-react'
 import {
   getPendingMaterials,
   approveMaterial,
   rejectMaterial,
   offlineMaterial,
+  getMaterialReports,
+  processMaterialReport,
 } from '@/lib/api/admin'
 import { getErrorMessage } from '@/lib/api/client'
 import { useAuth } from '@/hooks/use-auth'
@@ -31,7 +33,7 @@ import { ErrorState } from '@/components/shared/error-state'
 import { toast } from '@/components/ui/use-toast'
 import { formatRelativeTime } from '@/lib/utils'
 
-type ActionType = 'approve' | 'reject' | 'offline' | null
+type ActionType = 'approve' | 'reject' | 'offline' | 'report-resolve' | 'report-reject' | null
 
 export default function AdminPage() {
   const router = useRouter()
@@ -55,6 +57,12 @@ export default function AdminPage() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['admin', 'pending', page],
     queryFn: () => getPendingMaterials({ page, pageSize: 10 }),
+    enabled: isAdmin,
+  })
+
+  const { data: reportData } = useQuery({
+    queryKey: ['admin', 'reports', page],
+    queryFn: () => getMaterialReports({ page, pageSize: 10 }),
     enabled: isAdmin,
   })
 
@@ -105,6 +113,18 @@ export default function AdminPage() {
     onError: (err) => toast({ variant: 'destructive', title: '操作失败', description: getErrorMessage(err) }),
   })
 
+  const reportMut = useMutation({
+    mutationFn: ({ id, reason, offlineMaterial }: { id: string; reason: string; offlineMaterial?: boolean }) =>
+      processMaterialReport(id, { status: offlineMaterial ? 'RESOLVED' : 'REJECTED', reason, offlineMaterial }),
+    onSuccess: (data) => {
+      toast({ title: '举报已处理' })
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'reports'] })
+      invalidatePublic(data.materialId)
+      closeDialog()
+    },
+    onError: (err) => toast({ variant: 'destructive', title: '操作失败', description: getErrorMessage(err) }),
+  })
+
   const offlineMut = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) => offlineMaterial(id, reason),
     onSuccess: (_data, { id }) => {
@@ -128,6 +148,8 @@ export default function AdminPage() {
     if (actionType === 'approve') approveMut.mutate(actionTarget)
     if (actionType === 'reject') rejectMut.mutate({ id: actionTarget, reason })
     if (actionType === 'offline') offlineMut.mutate({ id: actionTarget, reason })
+    if (actionType === 'report-resolve') reportMut.mutate({ id: actionTarget, reason, offlineMaterial: true })
+    if (actionType === 'report-reject') reportMut.mutate({ id: actionTarget, reason })
   }
 
   if (!isAdmin) return null
@@ -231,12 +253,44 @@ export default function AdminPage() {
         </div>
       )}
 
+
+      {reportData?.items.length ? (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 pt-4">
+            <Flag className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-base font-semibold">资料举报</h2>
+            <Badge variant="secondary">{reportData.total} 条</Badge>
+          </div>
+          {reportData.items.map((report) => (
+            <div key={report.id} className="rounded-xl border bg-card p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={report.status === 'OPEN' ? 'destructive' : 'secondary'}>{report.status}</Badge>
+                    <a className="font-medium text-sm hover:underline" href={`/materials/${report.material.id}`} target="_blank" rel="noopener noreferrer">{report.material.title}</a>
+                  </div>
+                  <p className="text-sm">{report.reason}</p>
+                  {report.description && <p className="text-xs text-muted-foreground">说明：{report.description}</p>}
+                  {report.evidence && <p className="text-xs text-muted-foreground">证据：{report.evidence}</p>}
+                  <p className="text-xs text-muted-foreground">举报人 {report.reporter.username} · {formatRelativeTime(report.createdAt)}</p>
+                  {report.adminReason && <p className="text-xs text-muted-foreground">处理理由：{report.adminReason}</p>}
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button size="sm" variant="outline" disabled={reportMut.isPending || report.status === 'RESOLVED'} onClick={() => openDialog(report.id, 'report-resolve')}>下线并解决</Button>
+                  <Button size="sm" variant="ghost" disabled={reportMut.isPending || report.status === 'REJECTED'} onClick={() => openDialog(report.id, 'report-reject')}>驳回举报</Button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {/* Approve / Reject / Offline dialog */}
       <Dialog open={!!actionTarget} onOpenChange={(open) => !open && closeDialog()}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {actionType === 'approve' ? '确认通过审核' : actionType === 'reject' ? '驳回资料' : '下线资料'}
+              {actionType === 'approve' ? '确认通过审核' : actionType === 'reject' ? '驳回资料' : actionType === 'offline' ? '下线资料' : actionType === 'report-resolve' ? '处理举报并下线资料' : '驳回举报'}
             </DialogTitle>
             <DialogDescription>
               {actionType === 'approve'
@@ -268,11 +322,12 @@ export default function AdminPage() {
                 (actionType === 'reject' && !reason.trim()) ||
                 approveMut.isPending ||
                 rejectMut.isPending ||
-                offlineMut.isPending
+                offlineMut.isPending ||
+                reportMut.isPending
               }
               onClick={handleDialogConfirm}
             >
-              {actionType === 'approve' ? '确认通过' : actionType === 'reject' ? '确认驳回' : '确认下线'}
+              {actionType === 'approve' ? '确认通过' : actionType === 'reject' ? '确认驳回' : actionType === 'offline' ? '确认下线' : '确认处理'}
             </Button>
           </DialogFooter>
         </DialogContent>

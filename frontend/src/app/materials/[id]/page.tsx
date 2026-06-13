@@ -4,9 +4,9 @@ import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
-import { Download, Star, ChevronRight, FileText, Calendar, MapPin, User } from 'lucide-react'
+import { Download, Star, ChevronRight, FileText, Calendar, User, Flag } from 'lucide-react'
 import type { MaterialKind } from '@/types'
-import { getMaterial, downloadMaterial } from '@/lib/api/materials'
+import { getMaterial, downloadMaterial, reportMaterial } from '@/lib/api/materials'
 import { reportDwellEvent } from '@/lib/api/view-events'
 import { ensureCsrfToken, getErrorMessage } from '@/lib/api/client'
 import { useAuth } from '@/hooks/use-auth'
@@ -14,6 +14,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { RatingForm } from '@/components/materials/rating-form'
 import { RatingList } from '@/components/materials/rating-list'
 import { LoginPromptDialog } from '@/components/shared/login-prompt-dialog'
@@ -28,6 +31,11 @@ export default function MaterialDetailPage() {
   const [loginPromptOpen, setLoginPromptOpen] = useState(false)
   const [loginPromptMsg, setLoginPromptMsg] = useState('')
   const [downloading, setDownloading] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
+  const [reportReason, setReportReason] = useState('')
+  const [reportDescription, setReportDescription] = useState('')
+  const [reportEvidence, setReportEvidence] = useState('')
+  const [reporting, setReporting] = useState(false)
 
   const { data: material, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['material', id],
@@ -93,6 +101,31 @@ export default function MaterialDetailPage() {
     }
   }
 
+  const handleReport = async () => {
+    if (!isLoggedIn) {
+      setLoginPromptMsg('登录后即可举报资料')
+      setLoginPromptOpen(true)
+      return
+    }
+    try {
+      setReporting(true)
+      await reportMaterial(id, {
+        reason: reportReason.trim(),
+        description: reportDescription.trim() || undefined,
+        evidence: reportEvidence.trim() || undefined,
+      })
+      toast({ title: '举报已提交', description: '管理员会尽快处理并记录处理结果。' })
+      setReportOpen(false)
+      setReportReason('')
+      setReportDescription('')
+      setReportEvidence('')
+    } catch (err) {
+      toast({ variant: 'destructive', title: '提交失败', description: getErrorMessage(err) })
+    } finally {
+      setReporting(false)
+    }
+  }
+
   const handleRatingGuard = () => {
     if (!isLoggedIn) {
       setLoginPromptMsg('登录后即可评分')
@@ -120,6 +153,33 @@ export default function MaterialDetailPage() {
         onOpenChange={setLoginPromptOpen}
         message={loginPromptMsg}
       />
+
+      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>举报资料</DialogTitle>
+            <DialogDescription>请提交举报原因、详细说明和可选证据，方便管理员核验。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="report-reason">原因 *</Label>
+              <Textarea id="report-reason" rows={2} value={reportReason} onChange={(e) => setReportReason(e.target.value)} placeholder="例如：侵权、答案错误、不适宜内容…" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="report-description">说明</Label>
+              <Textarea id="report-description" rows={4} value={reportDescription} onChange={(e) => setReportDescription(e.target.value)} placeholder="请描述具体问题位置和影响…" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="report-evidence">证据</Label>
+              <Textarea id="report-evidence" rows={2} value={reportEvidence} onChange={(e) => setReportEvidence(e.target.value)} placeholder="可填写链接、出处或其他证明材料…" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReportOpen(false)}>取消</Button>
+            <Button onClick={handleReport} disabled={!reportReason.trim() || reporting}>{reporting ? '提交中…' : '提交举报'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Breadcrumb */}
       <nav className="mb-6 flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -233,6 +293,11 @@ export default function MaterialDetailPage() {
               >
                 <Download className="mr-2 h-4 w-4" />
                 {downloading ? '准备中…' : '下载'}
+              </Button>
+
+              <Button variant="outline" className="w-full" onClick={() => isLoggedIn ? setReportOpen(true) : (setLoginPromptMsg('登录后即可举报资料'), setLoginPromptOpen(true))}>
+                <Flag className="mr-2 h-4 w-4" />
+                举报资料
               </Button>
 
               {!isLoggedIn && (

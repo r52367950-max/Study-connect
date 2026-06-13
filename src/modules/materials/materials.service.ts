@@ -1,5 +1,5 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { FileSafetyStatus, Material, MaterialStatus, MaterialVisibility, Prisma } from '@prisma/client';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { AuditAction, FileSafetyStatus, Material, MaterialStatus, MaterialVisibility, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { MinioService, PrismaService } from '../../infra';
 import { CreateMaterialDto } from './dto/create-material.dto';
@@ -602,6 +602,92 @@ export class MaterialsService {
       id: material.id,
       fileKey: material.fileKey,
     };
+  }
+
+  async reportMaterial(materialId: string, reporterId: string, dto: { reason: string; description?: string; evidence?: string }) {
+    const material = await this.prisma.material.findFirst({
+      where: { id: materialId, status: MaterialStatus.APPROVED, visibility: MaterialVisibility.PUBLIC },
+      select: { id: true },
+    });
+    if (!material) throw new NotFoundException('Material not found');
+
+    return this.prisma.$transaction(async (tx) => {
+      const report = await tx.materialReport.create({
+        data: {
+          materialId,
+          reporterId,
+          reason: dto.reason.trim(),
+          description: dto.description?.trim() || null,
+          evidence: dto.evidence?.trim() || null,
+        },
+      });
+      await tx.materialAuditLog.create({
+        data: {
+          materialId,
+          action: AuditAction.MATERIAL_REPORT_CREATE,
+          reason: report.reason,
+          nextStatus: report.status,
+          reportId: report.id,
+        },
+      });
+      return report;
+    });
+  }
+
+  async appealMaterial(materialId: string, submitterId: string, dto: { reason: string; evidence?: string }) {
+    const material = await this.prisma.material.findUnique({
+      where: { id: materialId },
+      select: { id: true, uploaderId: true, status: true },
+    });
+    if (!material) throw new NotFoundException('Material not found');
+    if (material.uploaderId !== submitterId) throw new ForbiddenException('Only uploader can appeal');
+    if (material.status !== MaterialStatus.REJECTED && material.status !== MaterialStatus.OFFLINE) {
+      throw new ForbiddenException('Only rejected or offline materials can be appealed');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const appeal = await tx.materialAppeal.create({
+        data: { materialId, submitterId, reason: dto.reason.trim(), evidence: dto.evidence?.trim() || null },
+      });
+      await tx.materialAuditLog.create({
+        data: {
+          materialId,
+          action: AuditAction.MATERIAL_APPEAL_CREATE,
+          reason: appeal.reason,
+          nextStatus: appeal.status,
+          appealId: appeal.id,
+        },
+      });
+      return appeal;
+    });
+  }
+
+  async submitMaterialVersion(materialId: string, submitterId: string, dto: { fileKey: string; changelog?: string }) {
+    const material = await this.prisma.material.findUnique({
+      where: { id: materialId },
+      select: { id: true, uploaderId: true, status: true },
+    });
+    if (!material) throw new NotFoundException('Material not found');
+    if (material.uploaderId !== submitterId) throw new ForbiddenException('Only uploader can submit a version');
+    if (material.status !== MaterialStatus.REJECTED && material.status !== MaterialStatus.OFFLINE) {
+      throw new ForbiddenException('Only rejected or offline materials can receive a new version');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const version = await tx.materialVersion.create({
+        data: { materialId, submitterId, fileKey: dto.fileKey.trim(), changelog: dto.changelog?.trim() || null },
+      });
+      await tx.materialAuditLog.create({
+        data: {
+          materialId,
+          action: AuditAction.MATERIAL_VERSION_CREATE,
+          reason: version.changelog || 'Submitted new material version',
+          nextStatus: version.status,
+          versionId: version.id,
+        },
+      });
+      return version;
+    });
   }
 
   private buildApprovedWhere(query: MaterialSearchQueryDto): Prisma.MaterialWhereInput {
