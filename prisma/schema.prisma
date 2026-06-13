@@ -22,6 +22,7 @@ enum UserRole {
 enum UserStatus {
   ACTIVE
   BANNED
+  DELETED
 }
 
 enum MaterialStatus {
@@ -201,6 +202,7 @@ model Download {
 
   @@index([userId])
   @@index([materialId])
+  @@index([downloadedAt])
   @@map("downloads")
 }
 
@@ -232,6 +234,7 @@ model ViewEvent {
 
   @@index([userId, createdAt])
   @@index([materialId])
+  @@index([createdAt])
   @@map("view_events")
 }
 

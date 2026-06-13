@@ -3,9 +3,10 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { useQuery } from '@tanstack/react-query'
-import { User, Upload, Download, Settings, ChevronDown } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { User, Upload, Download, Settings, ChevronDown, ShieldCheck } from 'lucide-react'
 import { getMe } from '@/lib/api/auth'
+import { anonymizeMyAccount, exportMyData, updateMyProfile } from '@/lib/api/users'
 import { getMaterials } from '@/lib/api/materials'
 import { useAuth } from '@/hooks/use-auth'
 import { useProfile } from '@/hooks/use-profile'
@@ -101,9 +102,96 @@ export default function ProfilePage() {
         </TabsContent>
       </Tabs>
 
+      {/* Privacy controls */}
+      <PrivacySettingsSection />
+
       {/* Onboarding profile editor */}
       <EditOnboardingSection />
     </div>
+  )
+}
+
+
+function PrivacySettingsSection() {
+  const queryClient = useQueryClient()
+  const { data: profile } = useProfile()
+  const { logout } = useAuth()
+  const [message, setMessage] = useState<string | null>(null)
+
+  const optInMutation = useMutation({
+    mutationFn: (collaborativeOptIn: boolean) => updateMyProfile({ collaborativeOptIn }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['profile'], updated)
+      setMessage(updated.collaborativeOptIn ? '已开启协同推荐。' : '已关闭协同推荐，后续协同信号计算会排除你的行为数据。')
+    },
+  })
+
+  const exportMutation = useMutation({
+    mutationFn: exportMyData,
+    onSuccess: (data) => {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `study-connect-data-${new Date().toISOString().slice(0, 10)}.json`
+      link.click()
+      URL.revokeObjectURL(url)
+      setMessage('数据导出文件已开始下载。')
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: anonymizeMyAccount,
+    onSuccess: async () => {
+      setMessage('账号已匿名化。公开资料会保留为平台内容，个人资料和行为记录已清理。')
+      await logout()
+    },
+  })
+
+  const handleDelete = () => {
+    const ok = window.confirm('确认匿名化并退出账号？此操作会清空邮箱/手机号/学校/城市等 PII，删除收藏、下载和浏览行为；已审核公开上传资料会保留为平台公共内容。')
+    if (ok) deleteMutation.mutate()
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <ShieldCheck className="h-4 w-4" />
+          隐私与数据
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4 text-sm">
+        <div className="rounded-lg bg-muted/40 p-3 text-muted-foreground">
+          <p>关闭协同推荐后，你将不再进入后续「同校老师常用」等协同信号计算。账号删除采用匿名化：公开审核通过的上传资料保留为平台公共内容；邮箱、手机号、用户名、学校、城市、展示名等 PII 会清空，收藏、下载、浏览行为会删除。</p>
+          <p className="mt-2">行为数据保留周期：浏览事件 180 天，下载记录 365 天，后台定期清理。</p>
+        </div>
+
+        <label className="flex items-start gap-3 rounded-lg border p-3">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={profile?.collaborativeOptIn ?? true}
+            disabled={!profile || optInMutation.isPending}
+            onChange={(event) => optInMutation.mutate(event.target.checked)}
+          />
+          <span>
+            <span className="font-medium">参与协同推荐</span>
+            <span className="block text-xs text-muted-foreground">开启时仅使用满足人数阈值的聚合同校收藏信号，不展示单个用户身份。</span>
+          </span>
+        </label>
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Button variant="outline" onClick={() => exportMutation.mutate()} disabled={exportMutation.isPending}>
+            {exportMutation.isPending ? '导出中…' : '导出我的数据'}
+          </Button>
+          <Button variant="destructive" onClick={handleDelete} disabled={deleteMutation.isPending}>
+            {deleteMutation.isPending ? '处理中…' : '删除/匿名化账号'}
+          </Button>
+        </div>
+        {message ? <p className="text-xs text-muted-foreground">{message}</p> : null}
+      </CardContent>
+    </Card>
   )
 }
 
