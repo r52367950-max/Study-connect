@@ -20,6 +20,7 @@ import { SearchModule } from './modules/search/search.module';
 import { UsersModule } from './modules/users/users.module';
 import { ViewEventsModule } from './modules/view-events/view-events.module';
 import { HealthModule } from './modules/health/health.module';
+import { MetricsModule } from './modules/metrics/metrics.module';
 
 export const APP_GUARD_CHAIN = [RateLimitGuard, CsrfGuard, JwtAuthGuard, RolesGuard] as const;
 
@@ -67,6 +68,7 @@ const appGuardProviders: Provider[] = APP_GUARD_CHAIN.map((guardClass: Type<unkn
     DownloadsModule,
     SearchModule,
     HealthModule,
+    MetricsModule,
   ],
   providers: appGuardProviders,
 })

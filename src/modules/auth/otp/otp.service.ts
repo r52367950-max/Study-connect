@@ -5,6 +5,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import { OtpAttempt, OtpChannel, OtpPurpose } from '@prisma/client';
@@ -13,6 +14,7 @@ import { PrismaService } from '../../../infra';
 import { ConfigService } from '@nestjs/config';
 import type { MailProvider } from './mail.provider';
 import type { SmsProvider } from './sms.provider';
+import { MetricsService } from '../../metrics/metrics.service';
 
 export const SMS_PROVIDER = Symbol('OTP_SMS_PROVIDER');
 export const MAIL_PROVIDER = Symbol('OTP_MAIL_PROVIDER');
@@ -36,6 +38,7 @@ export class OtpService {
     private readonly config: ConfigService,
     @Inject(SMS_PROVIDER) private readonly smsProvider: SmsProvider,
     @Inject(MAIL_PROVIDER) private readonly mailProvider: MailProvider,
+    @Optional() private readonly metrics?: MetricsService,
   ) {}
 
   async send(input: {
@@ -75,12 +78,14 @@ export class OtpService {
       await this.prisma.otpAttempt
         .delete({ where: { id: createdAttempt.id } })
         .catch(() => undefined);
+      this.metrics?.increment('otp_failures_total', { channel: input.channel, purpose: input.purpose, reason: 'dispatch' });
       this.logger.error(
         `failed to dispatch OTP via ${input.channel} for ${maskIdentifier(input.identifier)}: ${(err as Error).message}`,
       );
       throw new HttpException('Failed to dispatch OTP', HttpStatus.BAD_GATEWAY);
     }
 
+    this.metrics?.increment('otp_sent_total', { channel: input.channel, purpose: input.purpose });
     this.logger.log({ event: 'OTP_SEND_SUCCESS', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) });
 
     return {
@@ -121,6 +126,7 @@ export class OtpService {
 
     if (!attempt || !this.codesEqual(attempt.codeHash, input.code)) {
       await this.recordVerifyFailure(input.channel, input.identifier, input.purpose);
+      this.metrics?.increment('otp_failures_total', { channel: input.channel, purpose: input.purpose, reason: 'invalid_or_expired' });
       this.logger.warn({ event: 'OTP_VERIFY_FAILED', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) });
       throw new UnauthorizedException('Invalid or expired OTP');
     }
@@ -132,10 +138,12 @@ export class OtpService {
       data: { consumedAt: now },
     });
     if (claimed.count === 0) {
+      this.metrics?.increment('otp_failures_total', { channel: input.channel, purpose: input.purpose, reason: 'replay' });
       this.logger.warn({ event: 'OTP_VERIFY_REPLAYED', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) });
       throw new UnauthorizedException('Invalid or expired OTP');
     }
 
+    this.metrics?.increment('otp_consumed_total', { channel: input.channel, purpose: input.purpose });
     this.logger.log({ event: 'OTP_VERIFY_SUCCESS', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) });
   }
 
@@ -182,6 +190,7 @@ export class OtpService {
     });
 
     if (count >= VERIFY_MAX_ATTEMPTS) {
+      this.metrics?.increment('otp_failures_total', { channel, purpose, reason: 'verify_rate_limited' });
       throw new HttpException('Too many incorrect codes; request a new one', HttpStatus.TOO_MANY_REQUESTS);
     }
   }
@@ -237,6 +246,7 @@ export class OtpService {
       },
     });
     if (count >= IP_MAX) {
+      this.metrics?.increment('otp_failures_total', { reason: 'ip_rate_limited' });
       this.logger.warn({ event: 'OTP_IP_RATE_LIMITED', ip, count, windowMs: IP_WINDOW_MS });
       throw new HttpException('Too many OTP requests from this IP, slow down', HttpStatus.TOO_MANY_REQUESTS);
     }
