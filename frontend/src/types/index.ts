@@ -150,9 +150,11 @@ export interface Rating {
 
 export interface PaginatedResponse<T> {
   items: T[]
-  total: number
+  total?: number
   page: number
   pageSize: number
+  hasMore?: boolean
+  nextCursor?: string | null
 }
 
 export interface MaterialSearchParams {
@@ -165,6 +167,7 @@ export interface MaterialSearchParams {
   sort?: MaterialSort
   page?: number
   pageSize?: number
+  cursor?: string
 }
 
 export interface UploadMaterialPayload {
