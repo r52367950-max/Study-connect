@@ -56,6 +56,7 @@ enum FileScanJobStatus {
   RUNNING
   DONE
   FAILED
+  DEAD_LETTER
 }
 
 enum OtpChannel {
@@ -100,8 +101,10 @@ model User {
   materials    Material[]
   ratings      Rating[]
   downloads    Download[]
+  downloadTokens DownloadToken[]
   favorites    Favorite[]
-  viewEvents   ViewEvent[]
+  viewEvents      ViewEvent[]
+  adminAuditLogs AdminAuditLog[] @relation("AdminAuditLogs")
 
   @@index([phone])
   @@index([email])
@@ -153,9 +156,11 @@ model Material {
   uploader      User               @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
   ratings       Rating[]
   downloads     Download[]
+  downloadTokens DownloadToken[]
   favorites     Favorite[]
   viewEvents    ViewEvent[]
   fileScanJob   FileScanJob?
+  fileScanReports FileScanReport[]
 
   @@index([uploaderId])
   @@index([status, createdAt])
@@ -204,6 +209,23 @@ model Download {
   @@map("downloads")
 }
 
+model DownloadToken {
+  token      String    @id
+  materialId String    @map("material_id") @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  expiresAt  DateTime  @map("expires_at")
+  usedAt     DateTime? @map("used_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  material   Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([materialId])
+  @@index([expiresAt])
+  @@map("download_tokens")
+}
+
 model Favorite {
   id         String   @id @default(uuid()) @db.Uuid
   userId     String   @map("user_id") @db.Uuid
@@ -235,6 +257,26 @@ model ViewEvent {
   @@map("view_events")
 }
 
+model AdminAuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  adminId    String   @map("admin_id") @db.Uuid
+  action     String
+  targetType String   @map("target_type")
+  targetId   String   @map("target_id") @db.Uuid
+  before     Json?
+  after      Json?
+  reason     String?
+  ip         String?
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  admin      User     @relation("AdminAuditLogs", fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([targetId, createdAt])
+  @@index([adminId, createdAt])
+  @@map("admin_audit_logs")
+}
+
 model OtpAttempt {
   id         String     @id @default(uuid()) @db.Uuid
   identifier String
@@ -262,10 +304,37 @@ model FileScanJob {
   attempts    Int               @default(0)
   lastError   String?           @map("last_error")
   scheduledAt DateTime          @default(now()) @map("scheduled_at")
+  nextRunAt   DateTime          @default(now()) @map("next_run_at")
+  lockedBy    String?           @map("locked_by")
+  lockedAt    DateTime?         @map("locked_at")
+  failedAt    DateTime?         @map("failed_at")
   updatedAt   DateTime          @updatedAt @map("updated_at")
 
   material    Material          @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  reports     FileScanReport[]
 
-  @@index([status, scheduledAt])
+  @@index([status, nextRunAt])
+  @@index([lockedBy, lockedAt])
   @@map("file_scan_jobs")
+}
+
+model FileScanReport {
+  id             String   @id @default(uuid()) @db.Uuid
+  jobId          String   @map("job_id") @db.Uuid
+  materialId     String   @map("material_id") @db.Uuid
+  verdict        String
+  engine         String
+  engineVersion  String?  @map("engine_version")
+  signature      String?
+  riskReasons    String[] @default([]) @map("risk_reasons")
+  scanDurationMs Int      @map("scan_duration_ms")
+  rawSummary     Json     @map("raw_summary")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  job       FileScanJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  material  Material    @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@index([materialId, createdAt])
+  @@index([jobId, createdAt])
+  @@map("file_scan_reports")
 }

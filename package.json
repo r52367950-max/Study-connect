@@ -36,6 +36,7 @@
     "test:min-recommend-tiering": "ts-node scripts/min-recommend-tiering-check.ts",
     "test:min-search-fts": "ts-node scripts/min-search-fts-check.ts",
     "recommend:evaluate": "ts-node scripts/evaluate-ranker.ts"
+    "test:min-admin-audit-log-transaction": "ts-node scripts/min-admin-audit-log-transaction-check.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"

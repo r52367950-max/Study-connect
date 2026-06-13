@@ -23,34 +23,36 @@ import {
   ApiOperation,
   ApiParam,
   ApiTags,
-} from '@nestjs/swagger';
-import { Request } from 'express';
-import { Public } from '../auth/decorators/public.decorator';
-import { RateLimit } from '../../common/rate-limit.decorator';
-import { PrismaService } from '../../infra';
-import { CreateMaterialDto } from './dto/create-material.dto';
-import { CreateRatingDto } from './dto/create-rating.dto';
-import { MaterialRatingsQueryDto } from './dto/material-ratings-query.dto';
-import { MaterialSearchQueryDto } from './dto/material-search-query.dto';
-import { RecommendQueryDto } from './dto/recommend-query.dto';
-import { UploadFileInput } from './file-upload.type';
-import { MaterialsService, UploadedMaterial } from './materials.service';
-import { RecommendationsService } from './recommendations.service';
+} from "@nestjs/swagger";
+import { Request } from "express";
+import { Public } from "../auth/decorators/public.decorator";
+import { RateLimit } from "../../common/rate-limit.decorator";
+import { PrismaService } from "../../infra";
+import { CreateMaterialDto } from "./dto/create-material.dto";
+import { CreateRatingDto } from "./dto/create-rating.dto";
+import { MaterialRatingsQueryDto } from "./dto/material-ratings-query.dto";
+import { MaterialSearchQueryDto } from "./dto/material-search-query.dto";
+import { RecommendQueryDto } from "./dto/recommend-query.dto";
+import { UploadFileInput } from "./file-upload.type";
+import { MaterialsService, UploadedMaterial } from "./materials.service";
+import { RecommendationsService } from "./recommendations.service";
 import {
   ALLOWED_MIME_TYPES,
   assertUploadFileSecurity,
   assertUploadFileSize,
   getMaxUploadSizeMb,
   MAX_UPLOAD_SIZE_MB_KEY,
-} from './upload-security.util';
+} from "./upload-security.util";
 
 // Unknown ids on this controller should look like the material doesn't exist,
 // not like a bad request — see docs/error-code-spec.md (Materials section).
-const materialIdParam = new ParseUUIDPipe({ errorHttpStatusCode: HttpStatus.NOT_FOUND });
+const materialIdParam = new ParseUUIDPipe({
+  errorHttpStatusCode: HttpStatus.NOT_FOUND,
+});
 
-@ApiTags('materials')
+@ApiTags("materials")
 @ApiBearerAuth()
-@Controller('materials')
+@Controller("materials")
 export class MaterialsController {
   constructor(
     private readonly materialsService: MaterialsService,
@@ -60,14 +62,16 @@ export class MaterialsController {
 
   @Get()
   @Public()
-  @ApiOperation({ summary: 'Public material search (APPROVED + PUBLIC only)' })
+  @ApiOperation({ summary: "Public material search (APPROVED + PUBLIC only)" })
   list(@Query() query: MaterialSearchQueryDto) {
     return this.materialsService.searchApproved(query);
   }
 
-  @Get('recommend')
-  @RateLimit({ name: 'materials-recommend', limit: 60, windowMs: 60_000 })
-  @ApiOperation({ summary: 'Personalized recommendation list based on profile + history' })
+  @Get("recommend")
+  @RateLimit({ name: "materials-recommend", limit: 60, windowMs: 60_000 })
+  @ApiOperation({
+    summary: "Personalized recommendation list based on profile + history",
+  })
   async recommend(@Req() req: Request, @Query() query: RecommendQueryDto) {
     const profile = await this.prisma.user.findUnique({
       where: { id: req.user.id },
@@ -103,79 +107,102 @@ export class MaterialsController {
     return { items, phase: items[0]?.phase ?? null };
   }
 
-  @Get(':id')
+  @Get(":id")
   @Public()
-  @ApiOperation({ summary: 'Public material detail (APPROVED + PUBLIC only)' })
-  @ApiParam({ name: 'id', type: String })
-  detail(@Param('id', materialIdParam) id: string) {
+  @ApiOperation({ summary: "Public material detail (APPROVED + PUBLIC only)" })
+  @ApiParam({ name: "id", type: String })
+  detail(@Param("id", materialIdParam) id: string) {
     return this.materialsService.getApprovedDetail(id);
   }
 
-  @Get(':id/ratings')
+  @Get(":id/ratings")
   @Public()
-  @ApiOperation({ summary: 'Public ratings list for one approved material' })
-  @ApiParam({ name: 'id', type: String })
-  listRatings(@Param('id', materialIdParam) id: string, @Query() query: MaterialRatingsQueryDto) {
+  @ApiOperation({ summary: "Public ratings list for one approved material" })
+  @ApiParam({ name: "id", type: String })
+  listRatings(
+    @Param("id", materialIdParam) id: string,
+    @Query() query: MaterialRatingsQueryDto,
+  ) {
     return this.materialsService.listApprovedMaterialRatings(id, query);
   }
 
-  @Post(':id/ratings')
+  @Post(":id/ratings")
   @RateLimit({
-    name: 'materials-rating-write',
+    name: "materials-rating-write",
     limit: 20,
     windowMs: 60_000,
   })
-  @ApiOperation({ summary: 'Create or update one rating for one approved material (login required)' })
-  @ApiParam({ name: 'id', type: String })
-  rateMaterial(@Param('id', materialIdParam) id: string, @Req() req: Request, @Body() dto: CreateRatingDto) {
-    return this.materialsService.upsertMaterialRating({ materialId: id, userId: req.user.id, dto });
+  @ApiOperation({
+    summary:
+      "Create or update one rating for one approved material (login required)",
+  })
+  @ApiParam({ name: "id", type: String })
+  rateMaterial(
+    @Param("id", materialIdParam) id: string,
+    @Req() req: Request,
+    @Body() dto: CreateRatingDto,
+  ) {
+    return this.materialsService.upsertMaterialRating({
+      materialId: id,
+      userId: req.user.id,
+      dto,
+    });
   }
 
-  @Get(':id/download')
+  @Get(":id/download")
   @RateLimit({
-    name: 'materials-download',
+    name: "materials-download",
     limit: 90,
     windowMs: 60_000,
   })
-  @ApiOperation({ summary: 'Download one approved public material (login required; APPROVED + PUBLIC)' })
-  @ApiParam({ name: 'id', type: String })
-  download(@Param('id', materialIdParam) id: string, @Req() req: Request) {
-    return this.materialsService.downloadApprovedMaterial(id, req.user.id);
+  @ApiOperation({
+    summary:
+      "Download one approved public material (login required; APPROVED + PUBLIC)",
+  })
+  @ApiParam({ name: "id", type: String })
+  download(@Param("id", materialIdParam) id: string, @Req() req: Request) {
+    return this.materialsService.downloadApprovedMaterial(id, req.user.id, req);
   }
 
   @Post()
   @RateLimit({
-    name: 'materials-upload',
+    name: "materials-upload",
     limit: 10,
     windowMs: 60_000,
   })
-  @ApiOperation({ summary: 'Upload material file to MinIO and create pending material record' })
-  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: "Upload material file to MinIO and create pending material record",
+  })
+  @ApiConsumes("multipart/form-data")
   @ApiBody({
     schema: {
-      type: 'object',
-      required: ['title', 'file'],
+      type: "object",
+      required: ["title", "file"],
       properties: {
-        title: { type: 'string' },
-        description: { type: 'string' },
-        stage: { type: 'string' },
-        grade: { type: 'string' },
-        subject: { type: 'string' },
-        year: { type: 'number' },
-        region: { type: 'string' },
-        visibility: { type: 'string', enum: ['PUBLIC', 'PRIVATE'] },
-        file: { type: 'string', format: 'binary' },
+        title: { type: "string" },
+        description: { type: "string" },
+        stage: { type: "string" },
+        grade: { type: "string" },
+        subject: { type: "string" },
+        year: { type: "number" },
+        region: { type: "string" },
+        visibility: { type: "string", enum: ["PUBLIC", "PRIVATE"] },
+        file: { type: "string", format: "binary" },
       },
     },
   })
   @UseInterceptors(
-    FileInterceptor('file', {
+    FileInterceptor("file", {
       limits: {
-        fileSize: getMaxUploadSizeMb(process.env[MAX_UPLOAD_SIZE_MB_KEY]) * 1024 * 1024,
+        fileSize:
+          getMaxUploadSizeMb(process.env[MAX_UPLOAD_SIZE_MB_KEY]) * 1024 * 1024,
       },
       fileFilter: (_req, file, callback) => {
         if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
-          callback(new UnprocessableEntityException('UNSUPPORTED_FILE_TYPE'), false);
+          callback(
+            new UnprocessableEntityException("UNSUPPORTED_FILE_TYPE"),
+            false,
+          );
           return;
         }
         callback(null, true);
@@ -193,7 +220,9 @@ export class MaterialsController {
     )
     file: UploadFileInput,
   ): Promise<UploadedMaterial> {
-    const maxUploadSizeMb = getMaxUploadSizeMb(process.env[MAX_UPLOAD_SIZE_MB_KEY]);
+    const maxUploadSizeMb = getMaxUploadSizeMb(
+      process.env[MAX_UPLOAD_SIZE_MB_KEY],
+    );
 
     try {
       assertUploadFileSize(file, maxUploadSizeMb);
@@ -206,7 +235,7 @@ export class MaterialsController {
       });
     } catch (error) {
       if (error instanceof PayloadTooLargeException) {
-        throw new UnprocessableEntityException('File exceeds size limit');
+        throw new UnprocessableEntityException("File exceeds size limit");
       }
       throw error;
     }
