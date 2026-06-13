@@ -13,6 +13,7 @@ class PrismaMock {
   fileScanReport = {
     create: async ({ data }: any) => { this.reports.push({ id: `r${this.reports.length + 1}`, ...data }); return this.reports.at(-1); },
   };
+  $transaction<T>(task: (tx: this) => Promise<T>): Promise<T> { return task(this); }
   material = { update: async ({ data }: any) => { this.materialStatus = data.fileSafetyStatus; } };
 }
 

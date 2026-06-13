@@ -171,6 +171,7 @@ function normalizeRemoteScanResult(raw: Record<string, unknown>, defaultEngine: 
 export class FileScanService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FileScanService.name);
   private timer: ReturnType<typeof setInterval> | null = null;
+  private readonly scannerId = process.env.FILE_SCAN_INSTANCE_ID ?? `${process.pid}-${Math.random().toString(36).slice(2)}`;
   // B4: reentrance guard — skip tick if a previous batch hasn't finished yet
   private isRunning = false;
 
@@ -198,8 +199,18 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
     }
     await this.prisma.fileScanJob.upsert({
       where: { materialId },
-      create: { materialId, fileKey, status: FileScanJobStatus.PENDING },
-      update: { fileKey, status: FileScanJobStatus.PENDING, scheduledAt: new Date(), lastError: null },
+      create: { materialId, fileKey, status: FileScanJobStatus.PENDING, nextRunAt: new Date() },
+      update: {
+        fileKey,
+        status: FileScanJobStatus.PENDING,
+        attempts: 0,
+        scheduledAt: new Date(),
+        nextRunAt: new Date(),
+        lockedBy: null,
+        lockedAt: null,
+        failedAt: null,
+        lastError: null,
+      },
     });
   }
 
@@ -211,25 +222,9 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
     }
     this.isRunning = true;
     try {
-      const now = new Date();
-      const jobs = await this.prisma.fileScanJob.findMany({
-        where: {
-          OR: [
-            { status: FileScanJobStatus.PENDING, scheduledAt: { lte: now } },
-            // Crash recovery: a process killed mid-batch leaves jobs stuck in RUNNING
-            // (and materials stuck in SCANNING) forever. Re-pick them once stale.
-            {
-              status: FileScanJobStatus.RUNNING,
-              updatedAt: { lt: new Date(now.getTime() - STALE_RUNNING_MS) },
-            },
-          ],
-        },
-        orderBy: { scheduledAt: 'asc' },
-        take: 5,
-      });
+      const jobs = await this.claimPendingJobs(5);
 
       for (const job of jobs) {
-        await this.prisma.fileScanJob.update({ where: { id: job.id }, data: { status: FileScanJobStatus.RUNNING } });
         await this.updateScanStatus(job.materialId, FileSafetyStatus.SCANNING);
         try {
           const payload = await this.fetchObject(job.fileKey);
@@ -271,9 +266,13 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
             where: { id: job.id },
             data: {
               attempts,
-              status: terminal ? FileScanJobStatus.FAILED : FileScanJobStatus.PENDING,
+              status: terminal ? FileScanJobStatus.DEAD_LETTER : FileScanJobStatus.PENDING,
               lastError: message,
               scheduledAt: new Date(Date.now() + (terminal ? 0 : this.retryBackoffMs(attempts))),
+              nextRunAt: new Date(Date.now() + (terminal ? 0 : this.retryBackoffMs(attempts))),
+              lockedBy: terminal ? this.scannerId : null,
+              lockedAt: terminal ? new Date() : null,
+              failedAt: terminal ? new Date() : null,
             },
           });
           this.logger.warn({ event: 'FILE_SCAN_FAILED', materialId: job.materialId, attempts, terminal, error: message });
@@ -282,6 +281,44 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
     } finally {
       this.isRunning = false;
     }
+  }
+
+  private async claimPendingJobs(take: number): Promise<FileScanJob[]> {
+    const now = new Date();
+    const staleBefore = new Date(now.getTime() - STALE_RUNNING_MS);
+    const candidates = await this.prisma.fileScanJob.findMany({
+      where: {
+        OR: [
+          { status: FileScanJobStatus.PENDING, nextRunAt: { lte: now } },
+          { status: FileScanJobStatus.RUNNING, lockedAt: { lt: staleBefore } },
+          { status: FileScanJobStatus.RUNNING, lockedAt: null, updatedAt: { lt: staleBefore } },
+        ],
+      },
+      orderBy: { nextRunAt: 'asc' },
+      take,
+    });
+
+    const claimed: FileScanJob[] = [];
+    for (const candidate of candidates) {
+      const result = await this.prisma.$transaction(async (tx) => {
+        const update = await tx.fileScanJob.updateMany({
+          where: {
+            id: candidate.id,
+            OR: [
+              { status: FileScanJobStatus.PENDING, nextRunAt: { lte: now } },
+              { status: FileScanJobStatus.RUNNING, lockedAt: { lt: staleBefore } },
+              { status: FileScanJobStatus.RUNNING, lockedAt: null, updatedAt: { lt: staleBefore } },
+            ],
+          },
+          data: { status: FileScanJobStatus.RUNNING, lockedBy: this.scannerId, lockedAt: now },
+        });
+        if (update.count !== 1) return null;
+        return tx.fileScanJob.findUnique({ where: { id: candidate.id } });
+      });
+      if (result) claimed.push(result);
+    }
+
+    return claimed;
   }
 
   private async fetchObject(key: string): Promise<Buffer> {

@@ -1,31 +1,41 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { FileSafetyStatus, Material, MaterialStatus, MaterialVisibility, Prisma } from '@prisma/client';
-import { randomUUID } from 'crypto';
-import { MinioService, PrismaService } from '../../infra';
-import { CreateMaterialDto } from './dto/create-material.dto';
-import { CreateRatingDto } from './dto/create-rating.dto';
-import { MaterialRatingsQueryDto } from './dto/material-ratings-query.dto';
-import { MaterialSearchQueryDto, MaterialSort } from './dto/material-search-query.dto';
-import { UploadFileInput } from './file-upload.type';
-import { FileScanService } from './file-scan.service';
-import { sanitizeFilename, stripControlChars } from './upload-security.util';
+import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import {
+  FileSafetyStatus,
+  Material,
+  MaterialStatus,
+  MaterialVisibility,
+  Prisma,
+} from "@prisma/client";
+import { randomUUID } from "crypto";
+import { MinioService, PrismaService } from "../../infra";
+import { DownloadsService } from "../downloads/downloads.service";
+import { CreateMaterialDto } from "./dto/create-material.dto";
+import { CreateRatingDto } from "./dto/create-rating.dto";
+import { MaterialRatingsQueryDto } from "./dto/material-ratings-query.dto";
+import {
+  MaterialSearchQueryDto,
+  MaterialSort,
+} from "./dto/material-search-query.dto";
+import { UploadFileInput } from "./file-upload.type";
+import { FileScanService } from "./file-scan.service";
+import { sanitizeFilename, stripControlChars } from "./upload-security.util";
 
 export type UploadedMaterial = Pick<
   Material,
-  | 'id'
-  | 'title'
-  | 'description'
-  | 'stage'
-  | 'grade'
-  | 'subject'
-  | 'year'
-  | 'region'
-  | 'fileKey'
-  | 'visibility'
-  | 'status'
-  | 'uploaderId'
-  | 'createdAt'
-  | 'fileSafetyStatus'
+  | "id"
+  | "title"
+  | "description"
+  | "stage"
+  | "grade"
+  | "subject"
+  | "year"
+  | "region"
+  | "fileKey"
+  | "visibility"
+  | "status"
+  | "uploaderId"
+  | "createdAt"
+  | "fileSafetyStatus"
 >;
 
 /**
@@ -49,6 +59,7 @@ export class MaterialsService {
     private readonly prisma: PrismaService,
     private readonly minioService: MinioService,
     private readonly fileScanService: FileScanService,
+    private readonly downloadsService: DownloadsService,
   ) {}
 
   async createWithFile(params: {
@@ -59,45 +70,51 @@ export class MaterialsService {
     const safeName = sanitizeFilename(params.file.originalname);
     const key = `${new Date().toISOString().slice(0, 10)}/${randomUUID()}-${safeName}`;
 
-    await this.minioService.uploadObject(key, params.file.buffer, params.file.mimetype);
+    await this.minioService.uploadObject(
+      key,
+      params.file.buffer,
+      params.file.mimetype,
+    );
 
     let material;
     try {
       material = await this.prisma.material.create({
-      data: {
-        title: stripControlChars(params.dto.title),
-        description: params.dto.description ? stripControlChars(params.dto.description) : undefined,
-        stage: params.dto.stage,
-        grade: params.dto.grade,
-        subject: params.dto.subject,
-        year: params.dto.year,
-        region: params.dto.region,
-        visibility: params.dto.visibility ?? MaterialVisibility.PUBLIC,
-        status: MaterialStatus.PENDING,
-        fileKey: key,
-        uploaderId: params.uploaderId,
-        fileSafetyStatus: FileSafetyStatus.QUARANTINED,
-      },
-      select: {
-        id: true,
-        title: true,
-        description: true,
-        stage: true,
-        grade: true,
-        subject: true,
-        year: true,
-        region: true,
-        fileKey: true,
-        visibility: true,
-        status: true,
-        uploaderId: true,
-        createdAt: true,
-        fileSafetyStatus: true,
-      },
+        data: {
+          title: stripControlChars(params.dto.title),
+          description: params.dto.description
+            ? stripControlChars(params.dto.description)
+            : undefined,
+          stage: params.dto.stage,
+          grade: params.dto.grade,
+          subject: params.dto.subject,
+          year: params.dto.year,
+          region: params.dto.region,
+          visibility: params.dto.visibility ?? MaterialVisibility.PUBLIC,
+          status: MaterialStatus.PENDING,
+          fileKey: key,
+          uploaderId: params.uploaderId,
+          fileSafetyStatus: FileSafetyStatus.QUARANTINED,
+        },
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          stage: true,
+          grade: true,
+          subject: true,
+          year: true,
+          region: true,
+          fileKey: true,
+          visibility: true,
+          status: true,
+          uploaderId: true,
+          createdAt: true,
+          fileSafetyStatus: true,
+        },
       });
     } catch (err) {
       await this.minioService.deleteObject(key).catch(() => {
-        this.logger.error({ event: 'orphan_cleanup_failed', fileKey: key });
+        this.logger.error({ event: "orphan_cleanup_failed", fileKey: key });
       });
       throw err;
     }
@@ -122,23 +139,26 @@ export class MaterialsService {
       // indexes; ordering still ranks by exact similarity() on the matched rows only.
       // `description % q` is NULL (falsy) for NULL descriptions, matching the old
       // similarity(COALESCE(description,''), q) > 0 which was always false there.
-      const rows = await this.runWithTrgmThreshold(this.prisma.$queryRaw<Array<{
-        id: string;
-        title: string;
-        description: string | null;
-        stage: string | null;
-        grade: string | null;
-        subject: string | null;
-        kind: string | null;
-        year: number | null;
-        region: string | null;
-        visibility: MaterialVisibility;
-        createdAt: Date;
-        downloadCount: number;
-        ratingSum: number;
-        ratingCount: number;
-        totalCount: bigint;
-      }>>(Prisma.sql`
+      const rows = await this.runWithTrgmThreshold(
+        this.prisma.$queryRaw<
+          Array<{
+            id: string;
+            title: string;
+            description: string | null;
+            stage: string | null;
+            grade: string | null;
+            subject: string | null;
+            kind: string | null;
+            year: number | null;
+            region: string | null;
+            visibility: MaterialVisibility;
+            createdAt: Date;
+            downloadCount: number;
+            ratingSum: number;
+            ratingCount: number;
+            totalCount: bigint;
+          }>
+        >(Prisma.sql`
         SELECT
           m.id, m.title, m.description, m.stage, m.grade, m.subject, m.kind, m.year, m.region,
           m.visibility, m.created_at AS "createdAt",
@@ -158,13 +178,15 @@ export class MaterialsService {
           AND (m.title % ${q} OR m.description % ${q})
         ORDER BY (similarity(m.title, ${q}) + similarity(COALESCE(m.description, ''), ${q})) DESC, m.created_at DESC
         LIMIT ${pageSize} OFFSET ${skip}
-      `));
+      `),
+      );
       // COUNT(*) OVER() only yields a value on non-empty pages. For an out-of-range
       // OFFSET (skip > 0 with no rows) fall back to a dedicated count so pagination metadata
       // stays correct instead of collapsing to total: 0 while earlier pages have matches.
       let total = rows[0] ? Number(rows[0].totalCount) : 0;
       if (rows.length === 0 && skip > 0) {
-        const countRows = await this.runWithTrgmThreshold(this.prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`
+        const countRows = await this.runWithTrgmThreshold(
+          this.prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`
           SELECT COUNT(*)::bigint AS total
           FROM materials m
           WHERE m.status = 'APPROVED'
@@ -176,7 +198,8 @@ export class MaterialsService {
             AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
             AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
             AND (m.title % ${q} OR m.description % ${q})
-        `));
+        `),
+        );
         total = countRows[0] ? Number(countRows[0].total) : 0;
       }
       return {
@@ -212,23 +235,26 @@ export class MaterialsService {
       // C2: when `q` is supplied, keep the keyword (trigram) filter — the keyword branch above only
       //     runs for non-RATING sorts, so without this `?q=...&sort=rating` would ignore the keyword.
       const q = query.q && query.q.trim() ? query.q.trim() : null;
-      const ratingRows = await this.runWithTrgmThreshold(this.prisma.$queryRaw<Array<{
-        id: string;
-        title: string;
-        description: string | null;
-        stage: string | null;
-        grade: string | null;
-        subject: string | null;
-        kind: string | null;
-        year: number | null;
-        region: string | null;
-        visibility: MaterialVisibility;
-        createdAt: Date;
-        avg_score: number | null;
-        rating_count: number;
-        download_count: number;
-        total_count: bigint;
-      }>>(Prisma.sql`
+      const ratingRows = await this.runWithTrgmThreshold(
+        this.prisma.$queryRaw<
+          Array<{
+            id: string;
+            title: string;
+            description: string | null;
+            stage: string | null;
+            grade: string | null;
+            subject: string | null;
+            kind: string | null;
+            year: number | null;
+            region: string | null;
+            visibility: MaterialVisibility;
+            createdAt: Date;
+            avg_score: number | null;
+            rating_count: number;
+            download_count: number;
+            total_count: bigint;
+          }>
+        >(Prisma.sql`
         SELECT
           m.id, m.title, m.description, m.stage, m.grade, m.subject, m.kind, m.year, m.region,
           m.visibility, m.created_at AS "createdAt",
@@ -248,14 +274,16 @@ export class MaterialsService {
           AND (${q}::text IS NULL OR m.title % ${q} OR m.description % ${q})
         ORDER BY avg_score DESC NULLS LAST, rating_count DESC, m.created_at DESC
         LIMIT ${pageSize} OFFSET ${skip}
-      `));
+      `),
+      );
 
       // C3: COUNT(*) OVER() only yields a value on non-empty pages. For an out-of-range
       // OFFSET (skip > 0 with no rows) fall back to a dedicated count so pagination metadata
       // stays correct instead of collapsing to total: 0 while earlier pages have matches.
       let total = ratingRows[0] ? Number(ratingRows[0].total_count) : 0;
       if (ratingRows.length === 0 && skip > 0) {
-        const countRows = await this.runWithTrgmThreshold(this.prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`
+        const countRows = await this.runWithTrgmThreshold(
+          this.prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`
           SELECT COUNT(*)::bigint AS total
           FROM materials m
           WHERE m.status = 'APPROVED'
@@ -267,7 +295,8 @@ export class MaterialsService {
             AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
             AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
             AND (${q}::text IS NULL OR m.title % ${q} OR m.description % ${q})
-        `));
+        `),
+        );
         total = countRows[0] ? Number(countRows[0].total) : 0;
       }
 
@@ -386,7 +415,11 @@ export class MaterialsService {
     };
   }
 
-  async upsertMaterialRating(params: { materialId: string; userId: string; dto: CreateRatingDto }) {
+  async upsertMaterialRating(params: {
+    materialId: string;
+    userId: string;
+    dto: CreateRatingDto;
+  }) {
     await this.ensurePublicApprovedMaterial(params.materialId);
 
     const upsertArgs = {
@@ -423,7 +456,10 @@ export class MaterialsService {
     } catch (err) {
       // Two concurrent first ratings can both take the `create` path; the loser hits the
       // unique constraint (P2002). Retry once — the row exists now, so upsert updates.
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === "P2002"
+      ) {
         rating = await this.prisma.rating.upsert(upsertArgs);
       } else {
         throw err;
@@ -462,7 +498,10 @@ export class MaterialsService {
     };
   }
 
-  async listApprovedMaterialRatings(materialId: string, query: MaterialRatingsQueryDto) {
+  async listApprovedMaterialRatings(
+    materialId: string,
+    query: MaterialRatingsQueryDto,
+  ) {
     await this.ensurePublicApprovedMaterial(materialId);
 
     const page = query.page ?? 1;
@@ -474,7 +513,7 @@ export class MaterialsService {
         where: { materialId },
         skip,
         take: pageSize,
-        orderBy: [{ createdAt: 'desc' }],
+        orderBy: [{ createdAt: "desc" }],
         select: {
           id: true,
           userId: true,
@@ -519,40 +558,21 @@ export class MaterialsService {
     };
   }
 
-  async downloadApprovedMaterial(materialId: string, userId: string) {
-    const material = await this.ensureDownloadablePublicMaterial(materialId);
-
-    // Atomic pair: the download row and the denormalized counter move together,
-    // so list/detail sort orders never drift from the downloads table.
-    const [download] = await this.prisma.$transaction([
-      this.prisma.download.create({
-        data: {
-          userId,
-          materialId: material.id,
-        },
-        select: {
-          id: true,
-          userId: true,
-          materialId: true,
-          downloadedAt: true,
-        },
-      }),
-      this.prisma.material.update({
-        where: { id: material.id },
-        data: { downloadCount: { increment: 1 } },
-        select: { id: true },
-      }),
-    ]);
-
-    return {
-      materialId: material.id,
-      downloadUrl: this.minioService.getSignedDownloadUrl(material.fileKey),
-      downloadRecord: download,
-    };
+  async downloadApprovedMaterial(
+    materialId: string,
+    userId: string,
+    request?: { protocol?: string; get?: (name: string) => string | undefined },
+  ) {
+    return this.downloadsService.createTokenForApprovedMaterial(
+      materialId,
+      userId,
+      request,
+    );
   }
 
-
-  private async ensurePublicApprovedMaterial<TSelect extends Prisma.MaterialSelect>(
+  private async ensurePublicApprovedMaterial<
+    TSelect extends Prisma.MaterialSelect,
+  >(
     materialId: string,
     options?: { select?: TSelect },
   ): Promise<Prisma.MaterialGetPayload<{ select: TSelect }>> {
@@ -565,19 +585,24 @@ export class MaterialsService {
         visibility: MaterialVisibility.PUBLIC,
         // PASSED or null (pre-scan legacy rows) — must mirror buildApprovedWhere and the
         // raw-SQL list branches, otherwise a material visible in lists 404s on detail/ratings.
-        OR: [{ fileSafetyStatus: FileSafetyStatus.PASSED }, { fileSafetyStatus: null }],
+        OR: [
+          { fileSafetyStatus: FileSafetyStatus.PASSED },
+          { fileSafetyStatus: null },
+        ],
       },
       select,
     });
 
     if (!material) {
-      throw new NotFoundException('Material not found');
+      throw new NotFoundException("Material not found");
     }
 
     return material as Prisma.MaterialGetPayload<{ select: TSelect }>;
   }
 
-  private async ensureDownloadablePublicMaterial(materialId: string): Promise<{ id: string; fileKey: string }> {
+  private async ensureDownloadablePublicMaterial(
+    materialId: string,
+  ): Promise<{ id: string; fileKey: string }> {
     const material = await this.ensurePublicApprovedMaterial(materialId, {
       select: {
         id: true,
@@ -588,14 +613,17 @@ export class MaterialsService {
 
     // Defense-in-depth tripwire: ensurePublicApprovedMaterial only returns PASSED/null rows,
     // but if its filter ever regresses, block the download here and raise the alert.
-    if (material.fileSafetyStatus !== FileSafetyStatus.PASSED && material.fileSafetyStatus !== null) {
+    if (
+      material.fileSafetyStatus !== FileSafetyStatus.PASSED &&
+      material.fileSafetyStatus !== null
+    ) {
       this.logger.warn({
-        event: 'SECURITY_ALERT_DOWNLOAD_BLOCKED',
+        event: "SECURITY_ALERT_DOWNLOAD_BLOCKED",
         materialId,
         fileSafetyStatus: material.fileSafetyStatus,
         timestamp: new Date().toISOString(),
       });
-      throw new NotFoundException('Material not found');
+      throw new NotFoundException("Material not found");
     }
 
     return {
@@ -604,7 +632,9 @@ export class MaterialsService {
     };
   }
 
-  private buildApprovedWhere(query: MaterialSearchQueryDto): Prisma.MaterialWhereInput {
+  private buildApprovedWhere(
+    query: MaterialSearchQueryDto,
+  ): Prisma.MaterialWhereInput {
     return {
       status: MaterialStatus.APPROVED,
       visibility: MaterialVisibility.PUBLIC,
@@ -612,42 +642,60 @@ export class MaterialsService {
       // i.e. null), matching the keyword raw-SQL branch and the detail/download
       // guard. Without this, APPROVED-but-QUARANTINED/SCANNING/FAILED/TIMEOUT
       // rows leak into list/RATING results and then 404 on click/download.
-      AND: [{ OR: [{ fileSafetyStatus: FileSafetyStatus.PASSED }, { fileSafetyStatus: null }] }],
+      AND: [
+        {
+          OR: [
+            { fileSafetyStatus: FileSafetyStatus.PASSED },
+            { fileSafetyStatus: null },
+          ],
+        },
+      ],
       ...(query.q
         ? {
             OR: [
-              { title: { contains: query.q, mode: 'insensitive' } },
-              { description: { contains: query.q, mode: 'insensitive' } },
+              { title: { contains: query.q, mode: "insensitive" } },
+              { description: { contains: query.q, mode: "insensitive" } },
             ],
           }
         : {}),
-      ...(query.stage ? { stage: { equals: query.stage, mode: 'insensitive' } } : {}),
-      ...(query.grade ? { grade: { equals: query.grade, mode: 'insensitive' } } : {}),
-      ...(query.subject ? { subject: { equals: query.subject, mode: 'insensitive' } } : {}),
-      ...(typeof query.year === 'number' ? { year: query.year } : {}),
-      ...(query.region ? { region: { equals: query.region, mode: 'insensitive' } } : {}),
+      ...(query.stage
+        ? { stage: { equals: query.stage, mode: "insensitive" } }
+        : {}),
+      ...(query.grade
+        ? { grade: { equals: query.grade, mode: "insensitive" } }
+        : {}),
+      ...(query.subject
+        ? { subject: { equals: query.subject, mode: "insensitive" } }
+        : {}),
+      ...(typeof query.year === "number" ? { year: query.year } : {}),
+      ...(query.region
+        ? { region: { equals: query.region, mode: "insensitive" } }
+        : {}),
     };
   }
 
-  private buildOrderBy(sort: MaterialSort, hasKeyword: boolean): Prisma.MaterialOrderByWithRelationInput[] {
+  private buildOrderBy(
+    sort: MaterialSort,
+    hasKeyword: boolean,
+  ): Prisma.MaterialOrderByWithRelationInput[] {
     // Perf: sort on the denormalized downloadCount column. The relation-count form
     // ({ downloads: { _count: 'desc' } }) made Prisma LEFT JOIN a GROUP BY over the
     // whole downloads table twice (once for ordering, once for the count selection).
     if (sort === MaterialSort.DOWNLOADS) {
-      return [{ downloadCount: 'desc' }, { createdAt: 'desc' }];
+      return [{ downloadCount: "desc" }, { createdAt: "desc" }];
     }
 
     if (sort === MaterialSort.RATING) {
-      return [{ createdAt: 'desc' }];
+      return [{ createdAt: "desc" }];
     }
 
     if (sort === MaterialSort.RELEVANCE) {
       return hasKeyword
-        ? [{ downloadCount: 'desc' }, { createdAt: 'desc' }]
-        : [{ createdAt: 'desc' }];
+        ? [{ downloadCount: "desc" }, { createdAt: "desc" }]
+        : [{ createdAt: "desc" }];
     }
 
-    return [{ createdAt: 'desc' }];
+    return [{ createdAt: "desc" }];
   }
 
   /**
@@ -668,7 +716,10 @@ export class MaterialsService {
 }
 
 /** avg = sum/count from the denormalized counters; null when unrated (or counters absent in mocks). */
-function averageFromCounters(sum: number | null | undefined, count: number | null | undefined): number | null {
+function averageFromCounters(
+  sum: number | null | undefined,
+  count: number | null | undefined,
+): number | null {
   const ratingCount = Number(count ?? 0);
   if (!ratingCount) {
     return null;

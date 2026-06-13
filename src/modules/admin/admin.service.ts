@@ -1,5 +1,5 @@
 import { Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
-import { MaterialStatus, UserStatus } from '@prisma/client';
+import { FileSafetyStatus, FileScanJobStatus, MaterialStatus, UserStatus } from '@prisma/client';
 import { PrismaService } from '../../infra';
 
 @Injectable()
