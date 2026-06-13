@@ -1,5 +1,6 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { FileSafetyStatus, FileScanJob, FileScanJobStatus } from '@prisma/client';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, UnprocessableEntityException } from '@nestjs/common';
+import { Socket } from 'node:net';
+import { FileSafetyStatus, FileScanJobStatus } from '@prisma/client';
 import { MinioService, PrismaService } from '../../infra';
 import { assertUploadFileSecurity, UploadSecurityStatus } from './upload-security.util';
 
@@ -9,6 +10,162 @@ const MAX_ATTEMPTS = 3;
 // A RUNNING job untouched for this long can only be a crashed batch (a healthy scan
 // finishes within DEFAULT_SCAN_TIMEOUT_MS); re-queue it on the next tick.
 const STALE_RUNNING_MS = 10 * 60_000;
+const EICAR_SIGNATURE = 'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*';
+
+export type FileScanVerdict = 'PASSED' | 'FAILED';
+
+export type FileScanPayload = {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+};
+
+export type FileScanResult = {
+  verdict: FileScanVerdict;
+  engine: string;
+  engineVersion?: string;
+  signature?: string;
+  riskReasons: string[];
+  scanDurationMs: number;
+  rawSummary?: unknown;
+};
+
+export interface FileScanner {
+  scan(file: FileScanPayload): Promise<FileScanResult>;
+}
+
+class LocalPolicyFileScanner implements FileScanner {
+  async scan(file: FileScanPayload): Promise<FileScanResult> {
+    const started = Date.now();
+    try {
+      assertUploadFileSecurity(file);
+      const body = file.buffer.toString('utf8');
+      if (body.includes(EICAR_SIGNATURE)) {
+        return {
+          verdict: 'FAILED',
+          engine: 'local-policy',
+          engineVersion: 'upload-security-v1',
+          signature: 'EICAR-Test-File',
+          riskReasons: ['EICAR_TEST_SIGNATURE'],
+          scanDurationMs: Date.now() - started,
+          rawSummary: { source: 'local-policy', match: 'EICAR_TEST_SIGNATURE' },
+        };
+      }
+      return {
+        verdict: 'PASSED',
+        engine: 'local-policy',
+        engineVersion: 'upload-security-v1',
+        riskReasons: [],
+        scanDurationMs: Date.now() - started,
+        rawSummary: { source: 'local-policy', status: 'PASSED' },
+      };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return {
+        verdict: 'FAILED',
+        engine: 'local-policy',
+        engineVersion: 'upload-security-v1',
+        riskReasons: [reason],
+        scanDurationMs: Date.now() - started,
+        rawSummary: { source: 'local-policy', error: reason },
+      };
+    }
+  }
+}
+
+class CommercialAvApiFileScanner implements FileScanner {
+  constructor(private readonly endpoint: string, private readonly token?: string) {}
+
+  async scan(file: FileScanPayload): Promise<FileScanResult> {
+    const started = Date.now();
+    const response = await fetch(this.endpoint, {
+      method: 'POST',
+      headers: {
+        'content-type': file.mimetype,
+        'x-file-name': encodeURIComponent(file.originalname),
+        ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
+      },
+      body: new Uint8Array(file.buffer),
+    });
+    if (!response.ok) throw new Error(`AV_API_FAILED:${response.status}`);
+    const raw = (await response.json()) as Record<string, unknown>;
+    return normalizeRemoteScanResult(raw, 'commercial-av-api', Date.now() - started);
+  }
+}
+
+class CdrServiceFileScanner implements FileScanner {
+  constructor(private readonly endpoint: string, private readonly token?: string) {}
+
+  async scan(file: FileScanPayload): Promise<FileScanResult> {
+    const started = Date.now();
+    const response = await fetch(this.endpoint, {
+      method: 'POST',
+      headers: {
+        'content-type': file.mimetype,
+        'x-file-name': encodeURIComponent(file.originalname),
+        ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
+      },
+      body: new Uint8Array(file.buffer),
+    });
+    if (!response.ok) throw new Error(`CDR_SERVICE_FAILED:${response.status}`);
+    const raw = (await response.json()) as Record<string, unknown>;
+    return normalizeRemoteScanResult(raw, 'cdr-service', Date.now() - started);
+  }
+}
+
+class ClamAvFileScanner implements FileScanner {
+  constructor(private readonly host: string, private readonly port: number) {}
+
+  async scan(file: FileScanPayload): Promise<FileScanResult> {
+    const started = Date.now();
+    const raw = await this.scanBuffer(file.buffer);
+    const found = raw.includes('FOUND');
+    const signature = found ? raw.split(':').pop()?.replace('FOUND', '').trim() : undefined;
+    return {
+      verdict: found ? 'FAILED' : 'PASSED',
+      engine: 'clamav',
+      signature,
+      riskReasons: found ? ['MALWARE_SIGNATURE'] : [],
+      scanDurationMs: Date.now() - started,
+      rawSummary: raw,
+    };
+  }
+
+  private scanBuffer(buffer: Buffer): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const socket = new Socket();
+      const chunks: Buffer[] = [];
+      socket.setTimeout(Number(process.env.FILE_SCAN_TIMEOUT_MS ?? String(DEFAULT_SCAN_TIMEOUT_MS)));
+      socket.once('error', reject);
+      socket.once('timeout', () => { socket.destroy(); reject(new Error('SCAN_TIMEOUT')); });
+      socket.on('data', (chunk) => chunks.push(chunk));
+      socket.once('close', () => resolve(Buffer.concat(chunks).toString('utf8').trim()));
+      socket.connect(this.port, this.host, () => {
+        socket.write('zINSTREAM\0');
+        const sizePrefix = Buffer.alloc(4);
+        sizePrefix.writeUInt32BE(buffer.length, 0);
+        socket.write(sizePrefix);
+        socket.write(buffer);
+        socket.write(Buffer.from([0, 0, 0, 0]));
+      });
+    });
+  }
+}
+
+function normalizeRemoteScanResult(raw: Record<string, unknown>, defaultEngine: string, duration: number): FileScanResult {
+  const verdict = String(raw.verdict ?? raw.status ?? '').toUpperCase() === 'PASSED' || raw.clean === true ? 'PASSED' : 'FAILED';
+  const riskReasons = Array.isArray(raw.riskReasons) ? raw.riskReasons.map(String) : (raw.reason ? [String(raw.reason)] : []);
+  return {
+    verdict,
+    engine: String(raw.engine ?? defaultEngine),
+    engineVersion: raw.engineVersion ? String(raw.engineVersion) : undefined,
+    signature: raw.signature ? String(raw.signature) : undefined,
+    riskReasons,
+    scanDurationMs: duration,
+    rawSummary: raw,
+  };
+}
 
 @Injectable()
 export class FileScanService implements OnModuleInit, OnModuleDestroy {
@@ -21,6 +178,7 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly minioService: MinioService,
+    private readonly scanner: FileScanner = createFileScannerFromEnv(),
   ) {}
 
   onModuleInit(): void {
@@ -70,20 +228,20 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
         await this.updateScanStatus(job.materialId, FileSafetyStatus.SCANNING);
         try {
           const payload = await this.fetchObject(job.fileKey);
-          const status = await this.executeWithTimeout(async () => {
-            assertUploadFileSecurity({
+          const report = await this.executeWithTimeout(() =>
+            this.scanner.scan({
               originalname: job.fileKey.split('/').pop() ?? 'file',
               mimetype: this.inferMime(job.fileKey),
               size: payload.length,
               buffer: payload,
-            });
-            return FileSafetyStatus.PASSED;
-          });
-          await this.updateScanStatus(job.materialId, status);
-          await this.prisma.fileScanJob.update({
-            where: { id: job.id },
-            data: { status: FileScanJobStatus.DONE, lastError: null, lockedBy: null, lockedAt: null, failedAt: null },
-          });
+            }),
+          );
+          await this.persistScanReport(job.id, job.materialId, report);
+          if (report.verdict === 'FAILED') {
+            throw new UnprocessableEntityException(report.riskReasons[0] ?? report.signature ?? 'FILE_SCAN_FAILED');
+          }
+          await this.updateScanStatus(job.materialId, FileSafetyStatus.PASSED);
+          await this.prisma.fileScanJob.update({ where: { id: job.id }, data: { status: FileScanJobStatus.DONE, lastError: null } });
         } catch (error) {
           const attempts = job.attempts + 1;
           const message = error instanceof Error ? error.message : String(error);
@@ -225,6 +383,24 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
     return Math.min(DEFAULT_SCAN_INTERVAL_MS * 2 ** Math.max(attempts - 1, 0), 5 * 60_000);
   }
 
+  private async persistScanReport(jobId: string, materialId: string, report: FileScanResult): Promise<void> {
+    const data = {
+      jobId,
+      materialId,
+      verdict: report.verdict,
+      engine: report.engine,
+      engineVersion: report.engineVersion,
+      signature: report.signature,
+      riskReasons: report.riskReasons,
+      scanDurationMs: report.scanDurationMs,
+      rawSummary: report.rawSummary ?? {},
+    };
+    const client = (this.prisma as any).fileScanReport;
+    if (client?.create) {
+      await client.create({ data });
+    }
+  }
+
   private async updateScanStatus(materialId: string, status: UploadSecurityStatus): Promise<void> {
     await this.prisma.material.update({ where: { id: materialId }, data: { fileSafetyStatus: status } });
   }
@@ -233,4 +409,18 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
     const value = Number(process.env.FILE_SCAN_TIMEOUT_MS ?? String(DEFAULT_SCAN_TIMEOUT_MS));
     return Number.isFinite(value) && value > 0 ? value : DEFAULT_SCAN_TIMEOUT_MS;
   }
+}
+
+export function createFileScannerFromEnv(): FileScanner {
+  const provider = (process.env.FILE_SCANNER_PROVIDER ?? '').toLowerCase();
+  if (provider === 'clamav') {
+    return new ClamAvFileScanner(process.env.CLAMAV_HOST ?? '127.0.0.1', Number(process.env.CLAMAV_PORT ?? '3310'));
+  }
+  if (provider === 'commercial-av' && process.env.FILE_SCANNER_API_URL) {
+    return new CommercialAvApiFileScanner(process.env.FILE_SCANNER_API_URL, process.env.FILE_SCANNER_API_TOKEN);
+  }
+  if (provider === 'cdr' && process.env.CDR_SERVICE_URL) {
+    return new CdrServiceFileScanner(process.env.CDR_SERVICE_URL, process.env.CDR_SERVICE_TOKEN);
+  }
+  return new LocalPolicyFileScanner();
 }
