@@ -94,3 +94,42 @@ export async function submitRating(
   const { data } = await apiClient.post<Rating>(`/materials/${materialId}/ratings`, ratingPayload)
   return data
 }
+
+export interface ReportMaterialPayload {
+  reason: string
+  description?: string
+  evidence?: string
+}
+
+export async function reportMaterial(
+  materialId: string,
+  payload: ReportMaterialPayload,
+): Promise<{ id: string; status: string }> {
+  const { data } = await apiClient.post<{ id: string; status: string }>(
+    `/materials/${materialId}/reports`,
+    payload,
+  )
+  return data
+}
+
+export async function appealMaterial(
+  materialId: string,
+  payload: { reason: string; evidence?: string },
+): Promise<{ id: string; status: string }> {
+  const { data } = await apiClient.post<{ id: string; status: string }>(
+    `/materials/${materialId}/appeals`,
+    payload,
+  )
+  return data
+}
+
+export async function submitMaterialVersion(
+  materialId: string,
+  payload: { fileKey: string; changelog?: string },
+): Promise<{ id: string; status: string }> {
+  const { data } = await apiClient.post<{ id: string; status: string }>(
+    `/materials/${materialId}/versions`,
+    payload,
+  )
+  return data
+}

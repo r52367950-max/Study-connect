@@ -29,6 +29,9 @@ import { RateLimit } from '../../common/rate-limit.decorator';
 import { PrismaService } from '../../infra';
 import { CreateMaterialDto } from './dto/create-material.dto';
 import { CreateRatingDto } from './dto/create-rating.dto';
+import { AppealMaterialDto } from './dto/appeal-material.dto';
+import { CreateMaterialVersionDto } from './dto/create-material-version.dto';
+import { ReportMaterialDto } from './dto/report-material.dto';
 import { MaterialRatingsQueryDto } from './dto/material-ratings-query.dto';
 import { MaterialSearchQueryDto } from './dto/material-search-query.dto';
 import { RecommendQueryDto } from './dto/recommend-query.dto';
@@ -108,6 +111,27 @@ export class MaterialsController {
   @ApiParam({ name: 'id', type: String })
   detail(@Param('id', materialIdParam) id: string) {
     return this.materialsService.getApprovedDetail(id);
+  }
+
+  @Post(':id/reports')
+  @RateLimit({ name: 'materials-report-write', limit: 10, windowMs: 60_000 })
+  @ApiOperation({ summary: 'Report one approved public material' })
+  report(@Param('id', materialIdParam) id: string, @Req() req: Request, @Body() dto: ReportMaterialDto) {
+    return this.materialsService.reportMaterial(id, req.user.id, dto);
+  }
+
+  @Post(':id/appeals')
+  @RateLimit({ name: 'materials-appeal-write', limit: 10, windowMs: 60_000 })
+  @ApiOperation({ summary: 'Uploader appeals a rejected or offline material' })
+  appeal(@Param('id', materialIdParam) id: string, @Req() req: Request, @Body() dto: AppealMaterialDto) {
+    return this.materialsService.appealMaterial(id, req.user.id, dto);
+  }
+
+  @Post(':id/versions')
+  @RateLimit({ name: 'materials-version-write', limit: 10, windowMs: 60_000 })
+  @ApiOperation({ summary: 'Uploader submits a replacement material version for review' })
+  submitVersion(@Param('id', materialIdParam) id: string, @Req() req: Request, @Body() dto: CreateMaterialVersionDto) {
+    return this.materialsService.submitMaterialVersion(id, req.user.id, dto);
   }
 
   @Get(':id/ratings')

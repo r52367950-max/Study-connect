@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
   previewFeatures = ["postgresqlExtensions"]
 }
 
@@ -58,6 +58,38 @@ enum FileScanJobStatus {
   FAILED
 }
 
+enum MaterialReportStatus {
+  OPEN
+  REVIEWING
+  RESOLVED
+  REJECTED
+}
+
+enum MaterialAppealStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum MaterialVersionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AuditAction {
+  MATERIAL_APPROVE
+  MATERIAL_REJECT
+  MATERIAL_OFFLINE
+  MATERIAL_RESTORE
+  MATERIAL_REPORT_CREATE
+  MATERIAL_REPORT_STATUS_CHANGE
+  MATERIAL_APPEAL_CREATE
+  MATERIAL_APPEAL_STATUS_CHANGE
+  MATERIAL_VERSION_CREATE
+  MATERIAL_VERSION_STATUS_CHANGE
+}
+
 enum OtpChannel {
   SMS
   EMAIL
@@ -80,28 +112,35 @@ model User {
   tokenVersion Int        @default(0) @map("token_version")
   avatarUrl    String?    @map("avatar_url")
 
-  profileRole          ProfileRole? @map("profile_role")
-  displayName          String?      @map("display_name")
-  schoolId             String?      @map("school_id") @db.Uuid
-  schoolNameFreeText   String?      @map("school_name_free_text")
-  city                 String?
-  stages               String[]     @default([])
-  grades               String[]     @default([])
-  subjects             String[]     @default([])
-  viewedKinds          String[]     @default([]) @map("viewed_kinds")
-  collaborativeOptIn   Boolean      @default(true) @map("collaborative_opt_in")
-  onboardedAt          DateTime?    @map("onboarded_at")
-  gradesUpdatedAt      DateTime?    @map("grades_updated_at")
+  profileRole        ProfileRole? @map("profile_role")
+  displayName        String?      @map("display_name")
+  schoolId           String?      @map("school_id") @db.Uuid
+  schoolNameFreeText String?      @map("school_name_free_text")
+  city               String?
+  stages             String[]     @default([])
+  grades             String[]     @default([])
+  subjects           String[]     @default([])
+  viewedKinds        String[]     @default([]) @map("viewed_kinds")
+  collaborativeOptIn Boolean      @default(true) @map("collaborative_opt_in")
+  onboardedAt        DateTime?    @map("onboarded_at")
+  gradesUpdatedAt    DateTime?    @map("grades_updated_at")
 
-  createdAt    DateTime   @default(now()) @map("created_at")
-  updatedAt    DateTime   @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  school       School?    @relation(fields: [schoolId], references: [id], onDelete: SetNull)
-  materials    Material[]
-  ratings      Rating[]
-  downloads    Download[]
-  favorites    Favorite[]
-  viewEvents   ViewEvent[]
+  school            School?            @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  materials         Material[]
+  ratings           Rating[]
+  downloads         Download[]
+  favorites         Favorite[]
+  viewEvents        ViewEvent[]
+  submittedReports  MaterialReport[]   @relation("MaterialReportReporter")
+  reviewedReports   MaterialReport[]   @relation("MaterialReportReviewer")
+  submittedAppeals  MaterialAppeal[]   @relation("MaterialAppealSubmitter")
+  reviewedAppeals   MaterialAppeal[]   @relation("MaterialAppealReviewer")
+  submittedVersions MaterialVersion[]  @relation("MaterialVersionSubmitter")
+  reviewedVersions  MaterialVersion[]  @relation("MaterialVersionReviewer")
+  auditLogs         MaterialAuditLog[] @relation("MaterialAuditAdmin")
 
   @@index([phone])
   @@index([email])
@@ -116,7 +155,7 @@ model School {
   pinyin    String
   createdAt DateTime @default(now()) @map("created_at")
 
-  users     User[]
+  users User[]
 
   @@unique([city, name])
   @@index([city, name])
@@ -125,37 +164,41 @@ model School {
 }
 
 model Material {
-  id            String             @id @default(uuid()) @db.Uuid
-  title         String
-  description   String?
-  stage         String?
-  grade         String?
-  subject       String?
-  kind          MaterialKind?
-  year          Int?
-  region        String?
-  fileKey       String             @map("file_key")
-  visibility    MaterialVisibility @default(PUBLIC)
-  status        MaterialStatus     @default(PENDING)
-  reviewComment String?            @map("review_comment")
-  fileSafetyStatus FileSafetyStatus? @map("file_safety_status")
+  id               String             @id @default(uuid()) @db.Uuid
+  title            String
+  description      String?
+  stage            String?
+  grade            String?
+  subject          String?
+  kind             MaterialKind?
+  year             Int?
+  region           String?
+  fileKey          String             @map("file_key")
+  visibility       MaterialVisibility @default(PUBLIC)
+  status           MaterialStatus     @default(PENDING)
+  reviewComment    String?            @map("review_comment")
+  fileSafetyStatus FileSafetyStatus?  @map("file_safety_status")
   // Denormalized read-path counters. downloadCount is incremented atomically with
   // each Download row; ratingSum/ratingCount are recomputed from ratings after each
   // upsert (convergent — a concurrent stale write self-heals on the next rating).
   // Rebuild after manual data surgery with scripts/backfill-material-counters.ts.
-  downloadCount Int                @default(0) @map("download_count")
-  ratingSum     Int                @default(0) @map("rating_sum")
-  ratingCount   Int                @default(0) @map("rating_count")
-  uploaderId    String             @map("uploader_id") @db.Uuid
-  createdAt     DateTime           @default(now()) @map("created_at")
-  updatedAt     DateTime           @updatedAt @map("updated_at")
+  downloadCount    Int                @default(0) @map("download_count")
+  ratingSum        Int                @default(0) @map("rating_sum")
+  ratingCount      Int                @default(0) @map("rating_count")
+  uploaderId       String             @map("uploader_id") @db.Uuid
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
 
-  uploader      User               @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
-  ratings       Rating[]
-  downloads     Download[]
-  favorites     Favorite[]
-  viewEvents    ViewEvent[]
-  fileScanJob   FileScanJob?
+  uploader    User               @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  ratings     Rating[]
+  downloads   Download[]
+  favorites   Favorite[]
+  viewEvents  ViewEvent[]
+  fileScanJob FileScanJob?
+  reports     MaterialReport[]
+  appeals     MaterialAppeal[]
+  versions    MaterialVersion[]
+  auditLogs   MaterialAuditLog[]
 
   @@index([uploaderId])
   @@index([status, createdAt])
@@ -173,16 +216,16 @@ model Material {
 }
 
 model Rating {
-  id          String    @id @default(uuid()) @db.Uuid
-  userId      String    @map("user_id") @db.Uuid
-  materialId  String    @map("material_id") @db.Uuid
-  score       Int
-  comment     String?
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  materialId String   @map("material_id") @db.Uuid
+  score      Int
+  comment    String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  material    Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
 
   @@unique([userId, materialId])
   @@index([materialId])
@@ -191,13 +234,13 @@ model Rating {
 }
 
 model Download {
-  id           String    @id @default(uuid()) @db.Uuid
-  userId       String    @map("user_id") @db.Uuid
-  materialId   String    @map("material_id") @db.Uuid
-  downloadedAt DateTime  @default(now()) @map("downloaded_at")
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  materialId   String   @map("material_id") @db.Uuid
+  downloadedAt DateTime @default(now()) @map("downloaded_at")
 
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  material     Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([materialId])
@@ -210,8 +253,8 @@ model Favorite {
   materialId String   @map("material_id") @db.Uuid
   createdAt  DateTime @default(now()) @map("created_at")
 
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  material   Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
 
   @@unique([userId, materialId])
   @@index([userId, createdAt])
@@ -220,15 +263,15 @@ model Favorite {
 }
 
 model ViewEvent {
-  id         String       @id @default(uuid()) @db.Uuid
-  userId     String       @map("user_id") @db.Uuid
-  materialId String       @map("material_id") @db.Uuid
+  id         String        @id @default(uuid()) @db.Uuid
+  userId     String        @map("user_id") @db.Uuid
+  materialId String        @map("material_id") @db.Uuid
   kind       MaterialKind?
-  dwellMs    Int          @default(0) @map("dwell_ms")
-  createdAt  DateTime     @default(now()) @map("created_at")
+  dwellMs    Int           @default(0) @map("dwell_ms")
+  createdAt  DateTime      @default(now()) @map("created_at")
 
-  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  material   Material     @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
   @@index([materialId])
@@ -253,7 +296,6 @@ model OtpAttempt {
   @@map("otp_attempts")
 }
 
-
 model FileScanJob {
   id          String            @id @default(uuid()) @db.Uuid
   materialId  String            @unique @map("material_id") @db.Uuid
@@ -264,8 +306,106 @@ model FileScanJob {
   scheduledAt DateTime          @default(now()) @map("scheduled_at")
   updatedAt   DateTime          @updatedAt @map("updated_at")
 
-  material    Material          @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
 
   @@index([status, scheduledAt])
   @@map("file_scan_jobs")
+}
+
+model MaterialReport {
+  id          String               @id @default(uuid()) @db.Uuid
+  materialId  String               @map("material_id") @db.Uuid
+  reporterId  String               @map("reporter_id") @db.Uuid
+  reason      String
+  description String?
+  evidence    String?
+  status      MaterialReportStatus @default(OPEN)
+  adminReason String?              @map("admin_reason")
+  reviewedBy  String?              @map("reviewed_by") @db.Uuid
+  reviewedAt  DateTime?            @map("reviewed_at")
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+
+  material  Material           @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  reporter  User               @relation("MaterialReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reviewer  User?              @relation("MaterialReportReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  auditLogs MaterialAuditLog[]
+
+  @@index([materialId, createdAt])
+  @@index([status, createdAt])
+  @@index([reporterId, createdAt])
+  @@map("material_reports")
+}
+
+model MaterialAppeal {
+  id          String               @id @default(uuid()) @db.Uuid
+  materialId  String               @map("material_id") @db.Uuid
+  submitterId String               @map("submitter_id") @db.Uuid
+  reason      String
+  evidence    String?
+  status      MaterialAppealStatus @default(PENDING)
+  adminReason String?              @map("admin_reason")
+  reviewedBy  String?              @map("reviewed_by") @db.Uuid
+  reviewedAt  DateTime?            @map("reviewed_at")
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+
+  material  Material           @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  submitter User               @relation("MaterialAppealSubmitter", fields: [submitterId], references: [id], onDelete: Cascade)
+  reviewer  User?              @relation("MaterialAppealReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  auditLogs MaterialAuditLog[]
+
+  @@index([materialId, createdAt])
+  @@index([status, createdAt])
+  @@index([submitterId, createdAt])
+  @@map("material_appeals")
+}
+
+model MaterialVersion {
+  id          String                @id @default(uuid()) @db.Uuid
+  materialId  String                @map("material_id") @db.Uuid
+  submitterId String                @map("submitter_id") @db.Uuid
+  fileKey     String                @map("file_key")
+  changelog   String?
+  status      MaterialVersionStatus @default(PENDING)
+  adminReason String?               @map("admin_reason")
+  reviewedBy  String?               @map("reviewed_by") @db.Uuid
+  reviewedAt  DateTime?             @map("reviewed_at")
+  createdAt   DateTime              @default(now()) @map("created_at")
+  updatedAt   DateTime              @updatedAt @map("updated_at")
+
+  material  Material           @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  submitter User               @relation("MaterialVersionSubmitter", fields: [submitterId], references: [id], onDelete: Cascade)
+  reviewer  User?              @relation("MaterialVersionReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  auditLogs MaterialAuditLog[]
+
+  @@index([materialId, createdAt])
+  @@index([status, createdAt])
+  @@index([submitterId, createdAt])
+  @@map("material_versions")
+}
+
+model MaterialAuditLog {
+  id             String      @id @default(uuid()) @db.Uuid
+  materialId     String      @map("material_id") @db.Uuid
+  adminId        String?     @map("admin_id") @db.Uuid
+  action         AuditAction
+  reason         String
+  previousStatus String?     @map("previous_status")
+  nextStatus     String?     @map("next_status")
+  reportId       String?     @map("report_id") @db.Uuid
+  appealId       String?     @map("appeal_id") @db.Uuid
+  versionId      String?     @map("version_id") @db.Uuid
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  material Material         @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  admin    User?            @relation("MaterialAuditAdmin", fields: [adminId], references: [id], onDelete: SetNull)
+  report   MaterialReport?  @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  appeal   MaterialAppeal?  @relation(fields: [appealId], references: [id], onDelete: Cascade)
+  version  MaterialVersion? @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([materialId, createdAt])
+  @@index([adminId, createdAt])
+  @@index([action, createdAt])
+  @@map("material_audit_logs")
 }
