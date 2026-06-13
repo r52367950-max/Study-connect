@@ -100,6 +100,7 @@ model User {
   materials    Material[]
   ratings      Rating[]
   downloads    Download[]
+  downloadTokens DownloadToken[]
   favorites    Favorite[]
   viewEvents   ViewEvent[]
 
@@ -153,6 +154,7 @@ model Material {
   uploader      User               @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
   ratings       Rating[]
   downloads     Download[]
+  downloadTokens DownloadToken[]
   favorites     Favorite[]
   viewEvents    ViewEvent[]
   fileScanJob   FileScanJob?
@@ -202,6 +204,23 @@ model Download {
   @@index([userId])
   @@index([materialId])
   @@map("downloads")
+}
+
+model DownloadToken {
+  token      String    @id
+  materialId String    @map("material_id") @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  expiresAt  DateTime  @map("expires_at")
+  usedAt     DateTime? @map("used_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  material   Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([materialId])
+  @@index([expiresAt])
+  @@map("download_tokens")
 }
 
 model Favorite {
