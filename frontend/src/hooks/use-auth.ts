@@ -1,6 +1,6 @@
 'use client'
 
-import { useAuthStore } from '@/lib/auth-store'
+import { broadcastAuthEvent, useAuthStore } from '@/lib/auth-store'
 import { logout as logoutApi } from '@/lib/api/auth'
 import { resetReportedViewIds } from '@/components/materials/material-row'
 import { clearRecentSearches } from '@/components/shared/command-palette'
@@ -24,7 +24,8 @@ export function useAuth() {
     resetReportedViewIds()
     clearRecentSearches(userId)
     void logoutApi().catch(() => undefined)
-    clearAuth()
+    clearAuth({ broadcast: false })
+    broadcastAuthEvent({ type: 'logout' })
     router.push('/login')
   }, [clearAuth, queryClient, router, user?.id])
 
