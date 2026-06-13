@@ -101,7 +101,8 @@ model User {
   ratings      Rating[]
   downloads    Download[]
   favorites    Favorite[]
-  viewEvents   ViewEvent[]
+  viewEvents      ViewEvent[]
+  adminAuditLogs AdminAuditLog[] @relation("AdminAuditLogs")
 
   @@index([phone])
   @@index([email])
@@ -233,6 +234,26 @@ model ViewEvent {
   @@index([userId, createdAt])
   @@index([materialId])
   @@map("view_events")
+}
+
+model AdminAuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  adminId    String   @map("admin_id") @db.Uuid
+  action     String
+  targetType String   @map("target_type")
+  targetId   String   @map("target_id") @db.Uuid
+  before     Json?
+  after      Json?
+  reason     String?
+  ip         String?
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  admin      User     @relation("AdminAuditLogs", fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([targetId, createdAt])
+  @@index([adminId, createdAt])
+  @@map("admin_audit_logs")
 }
 
 model OtpAttempt {
