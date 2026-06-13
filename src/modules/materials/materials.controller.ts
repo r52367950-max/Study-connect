@@ -15,6 +15,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { UserRole } from '@prisma/client';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -97,7 +98,7 @@ export class MaterialsController {
         collaborativeOptIn: profile.collaborativeOptIn,
         onboardedAt: profile.onboardedAt,
       },
-      { limit: query.limit, ranker: query.ranker },
+      { limit: query.limit, ranker: query.ranker, includeDebugSignals: req.user.role === UserRole.ADMIN || query.debug === true },
     );
     return { items, phase: items[0]?.phase ?? null };
   }
