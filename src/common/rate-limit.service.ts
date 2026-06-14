@@ -183,8 +183,12 @@ class MinimalRedisClient implements OnModuleDestroy {
   async command(args: Array<string | number>): Promise<RedisValue> {
     await this.connect();
     return new Promise<RedisValue>((resolve, reject) => {
+      if (!this.socket || this.socket.destroyed) {
+        reject(new Error('Redis socket is not connected'));
+        return;
+      }
       this.queue.push({ resolve, reject });
-      this.socket!.write(this.encode(args));
+      this.socket.write(this.encode(args));
     });
   }
 
@@ -207,7 +211,11 @@ class MinimalRedisClient implements OnModuleDestroy {
       this.socket = socket;
       socket.once('connect', () => {
         const auth = parsed.password
-          ? this.commandConnected(['AUTH', decodeURIComponent(parsed.username || 'default'), decodeURIComponent(parsed.password)])
+          ? this.commandConnected(
+              parsed.username
+                ? ['AUTH', decodeURIComponent(parsed.username), decodeURIComponent(parsed.password)]
+                : ['AUTH', decodeURIComponent(parsed.password)],
+            )
           : Promise.resolve(null);
         auth
           .then(() => (parsed.pathname && parsed.pathname !== '/' ? this.commandConnected(['SELECT', parsed.pathname.slice(1)]) : null))
@@ -218,6 +226,10 @@ class MinimalRedisClient implements OnModuleDestroy {
       socket.on('error', (err) => this.rejectAll(err));
       socket.on('close', () => {
         this.socket = null;
+        this.buffer = Buffer.alloc(0);
+        // Reject any in-flight commands so awaiting callers fail fast instead of
+        // hanging forever when Redis drops the connection (restart/idle/network blip).
+        this.rejectAll(new Error('Redis connection closed'));
       });
     }).finally(() => {
       this.connecting = null;
@@ -246,22 +258,43 @@ class MinimalRedisClient implements OnModuleDestroy {
   private handleData(chunk: Buffer): void {
     this.buffer = Buffer.concat([this.buffer, chunk]);
     while (this.queue.length > 0) {
-      const parsed = this.parse(0);
+      let parsed: { value: RedisValue; next: number; isError?: boolean } | null;
+      try {
+        parsed = this.parse(0);
+      } catch (err) {
+        // Unrecoverable protocol desync (unknown RESP type / malformed frame): we can
+        // no longer trust reply↔request correlation. Reject everything in flight and
+        // reset the connection so the next command reconnects cleanly, rather than
+        // silently mis-correlating all subsequent rate-limit decisions.
+        const error = err instanceof Error ? err : new Error(String(err));
+        this.rejectAll(error);
+        this.buffer = Buffer.alloc(0);
+        this.socket?.destroy();
+        this.socket = null;
+        return;
+      }
       if (!parsed) return;
       this.buffer = this.buffer.subarray(parsed.next);
       const pending = this.queue.shift()!;
-      pending.resolve(parsed.value);
+      if (parsed.isError) {
+        // A `-ERR ...` reply belongs to exactly this command: reject only it and keep
+        // the buffer in sync (we consumed up to parsed.next), so later replies stay aligned.
+        pending.reject(new Error(`Redis error: ${String(parsed.value)}`));
+      } else {
+        pending.resolve(parsed.value);
+      }
     }
   }
 
-  private parse(offset: number): { value: RedisValue; next: number } | null {
+  private parse(offset: number): { value: RedisValue; next: number; isError?: boolean } | null {
+    if (offset >= this.buffer.length) return null;
     const type = String.fromCharCode(this.buffer[offset]);
     const lineEnd = this.buffer.indexOf('\r\n', offset);
     if (lineEnd < 0) return null;
     const line = this.buffer.toString('utf8', offset + 1, lineEnd);
     const next = lineEnd + 2;
     if (type === '+' || type === ':') return { value: type === ':' ? Number(line) : line, next };
-    if (type === '-') throw new Error(`Redis error: ${line}`);
+    if (type === '-') return { value: line, next, isError: true };
     if (type === '$') {
       const len = Number(line);
       if (len < 0) return { value: null, next };
@@ -270,6 +303,7 @@ class MinimalRedisClient implements OnModuleDestroy {
     }
     if (type === '*') {
       const len = Number(line);
+      if (len < 0) return { value: null, next };
       const values: RedisValue[] = [];
       let cursor = next;
       for (let i = 0; i < len; i += 1) {
@@ -293,8 +327,14 @@ class RedisRateLimitStore implements RateLimitStore {
 
   private readonly counterScript = `
 local current = redis.call('INCR', KEYS[1])
-if current == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
 local ttl = redis.call('PTTL', KEYS[1])
+-- Set the window TTL on the first hit, and also self-heal any key that somehow lost
+-- its expiry (PTTL < 0 = no TTL / missing) so a counter can never become immortal
+-- and trap an IP/identity behind a permanent 429.
+if current == 1 or ttl < 0 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+  ttl = tonumber(ARGV[1])
+end
 return { current, ttl }
 `;
 

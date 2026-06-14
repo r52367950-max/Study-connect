@@ -158,7 +158,13 @@ export class DownloadsService {
         id: materialId,
         status: MaterialStatus.APPROVED,
         ...(options?.publicOnly ? { visibility: "PUBLIC" as const } : {}),
-        fileSafetyStatus: { in: [FileSafetyStatus.PASSED] },
+        // Match the list/detail visibility contract: serve PASSED or legacy pre-scan
+        // (null) rows. Restricting to PASSED-only here 404'd materials that still appear
+        // in lists/detail — a visible-but-undownloadable regression from the #91 merge.
+        OR: [
+          { fileSafetyStatus: FileSafetyStatus.PASSED },
+          { fileSafetyStatus: null },
+        ],
       },
       select: {
         id: true,
@@ -191,27 +197,28 @@ export class DownloadsService {
     userId: string,
     usedAt: Date,
   ) {
-    await this.prisma.$transaction([
-      (this.prisma as any).downloadToken.update({
-        where: { token },
+    await this.prisma.$transaction(async (tx) => {
+      // Atomically claim the token: only the redeem that flips usedAt from null wins.
+      // Without the `usedAt: null` guard, two concurrent redeems of the same token both
+      // pass the earlier `if (record.usedAt)` check and both create a Download row +
+      // bump downloadCount, defeating single-use and inflating the counter.
+      const claimed = await (tx as any).downloadToken.updateMany({
+        where: { token, usedAt: null },
         data: { usedAt },
-        select: { token: true },
-      }),
-      this.prisma.download.create({
+      });
+      if (claimed.count !== 1) {
+        throw new GoneException("DOWNLOAD_TOKEN_USED");
+      }
+      await tx.download.create({
         data: { userId, materialId },
-        select: {
-          id: true,
-          userId: true,
-          materialId: true,
-          downloadedAt: true,
-        },
-      }),
-      this.prisma.material.update({
+        select: { id: true },
+      });
+      await tx.material.update({
         where: { id: materialId },
         data: { downloadCount: { increment: 1 } },
         select: { id: true },
-      }),
-    ]);
+      });
+    });
   }
 
   private getBaseUrl(request?: {

@@ -31,6 +31,7 @@
     "test:min-auth-token-hardening": "ts-node scripts/min-auth-token-hardening-check.ts",
     "test:min-recommendations": "ts-node scripts/min-recommendations-check.ts",
     "cleanup:otp": "ts-node scripts/cleanup-otp-attempts.ts",
+    "cleanup:download-tokens": "ts-node scripts/cleanup-download-tokens.ts",
     "backfill:material-counters": "ts-node scripts/backfill-material-counters.ts",
     "test:min-file-scan-async": "ts-node scripts/min-file-scan-async-check.ts",
     "test:min-recommend-tiering": "ts-node scripts/min-recommend-tiering-check.ts",
