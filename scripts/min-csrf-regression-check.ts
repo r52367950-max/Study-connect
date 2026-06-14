@@ -198,11 +198,11 @@ function assertEqual<T>(actual: T, expected: T, label: string): void {
 
 async function discoverStateChangingRoutes(): Promise<string[]> {
   const routes: string[] = [];
-  const methodRegex = /@(Post|Put|Patch|Delete)\((?:'([^']*)')?\)/g;
+  const methodRegex = /@(Post|Put|Patch|Delete)\((?:['"]([^'"]*)['"])?\)/g;
 
   for (const relativePath of CONTROLLER_FILES) {
     const fileContent = await readFile(resolve(process.cwd(), relativePath), 'utf8');
-    const controllerMatch = fileContent.match(/@Controller\('([^']*)'\)/);
+    const controllerMatch = fileContent.match(/@Controller\(['"]([^'"]*)['"]\)/);
     if (!controllerMatch) {
       continue;
     }

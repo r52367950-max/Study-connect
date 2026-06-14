@@ -203,6 +203,23 @@ class PrismaServiceMock {
       if (item) item.usedAt = data.usedAt;
       return { token: where.token };
     },
+    updateMany: async ({
+      where,
+      data,
+    }: {
+      where: { token: string; usedAt?: null };
+      data: { usedAt: Date };
+    }) => {
+      // Mirrors the atomic single-use claim: only succeed while usedAt is null.
+      const item = this.downloadTokens.find(
+        (candidate) =>
+          candidate.token === where.token &&
+          (where.usedAt === undefined || candidate.usedAt === null),
+      );
+      if (!item) return { count: 0 };
+      item.usedAt = data.usedAt;
+      return { count: 1 };
+    },
   };
 
   download = {

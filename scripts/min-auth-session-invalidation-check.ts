@@ -119,6 +119,19 @@ class PrismaServiceMock {
     findMany: async () => [],
     count: async () => 0,
   };
+
+  // #93 added admin audit logging: banUser now wraps the user update +
+  // adminAuditLog.create in a $transaction. Mirror both so the ban path resolves
+  // (otherwise ban 500s, the assertion throws, and the script hangs on app.listen).
+  adminAuditLog = {
+    create: async () => ({ id: 'audit-1' }),
+  };
+
+  async $transaction(arg: unknown): Promise<unknown> {
+    return Array.isArray(arg)
+      ? Promise.all(arg)
+      : (arg as (tx: this) => Promise<unknown>)(this);
+  }
 }
 
 function getCookiePair(setCookieHeader: string | null): string {
@@ -353,5 +366,7 @@ async function run(): Promise<void> {
 
 run().catch((error: unknown) => {
   console.error(error);
-  process.exitCode = 1;
+  // Force-exit: app.listen() keeps an open handle, so a failed assertion before
+  // app.close() would otherwise hang the process (and block the min-all runner).
+  process.exit(1);
 });

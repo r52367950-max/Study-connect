@@ -1,6 +1,6 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit, UnprocessableEntityException } from '@nestjs/common';
+import { Injectable, Logger, Optional, OnModuleDestroy, OnModuleInit, UnprocessableEntityException } from '@nestjs/common';
 import { Socket } from 'node:net';
-import { FileSafetyStatus, FileScanJobStatus } from '@prisma/client';
+import { FileSafetyStatus, FileScanJob, FileScanJobStatus } from '@prisma/client';
 import { MinioService, PrismaService } from '../../infra';
 import { assertUploadFileSecurity, UploadSecurityStatus } from './upload-security.util';
 
@@ -178,7 +178,7 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly minioService: MinioService,
-    private readonly scanner: FileScanner = createFileScannerFromEnv(),
+    @Optional() private readonly scanner: FileScanner = createFileScannerFromEnv(),
   ) {}
 
   onModuleInit(): void {
