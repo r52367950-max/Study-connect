@@ -74,6 +74,26 @@ export class AdminService {
     };
   }
 
+  async getMaterialScanDetails(materialId: string) {
+    const material = await this.prisma.material.findUnique({
+      where: { id: materialId },
+      select: { id: true, title: true, status: true, fileSafetyStatus: true },
+    });
+
+    if (!material) {
+      throw new NotFoundException('Material not found');
+    }
+
+    const scanJob = await this.prisma.fileScanJob.findUnique({
+      where: { materialId },
+      include: {
+        reports: { orderBy: { createdAt: 'desc' } },
+      },
+    });
+
+    return { material, scanJob };
+  }
+
   async approveMaterial(materialId: string, adminId: string, context: AuditContext = {}) {
     return this.updateMaterialReview(
       materialId,
