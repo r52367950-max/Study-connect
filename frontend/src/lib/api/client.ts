@@ -1,5 +1,5 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios'
-import { useAuthStore } from '@/lib/auth-store'
+import { broadcastAuthEvent, useAuthStore } from '@/lib/auth-store'
 
 export const apiClient = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000',
@@ -10,7 +10,7 @@ export const apiClient = axios.create({
 const CSRF_COOKIE_NAME = 'csrf-token'
 export const CSRF_HEADER_NAME = 'x-csrf-token'
 const STATE_CHANGING_METHODS = new Set(['post', 'put', 'patch', 'delete'])
-const CSRF_TOKEN_PATTERN = /^[a-f0-9]{64}$/i
+const CSRF_TOKEN_PATTERN = /^[^;\s]+$/
 let csrfBootstrapPromise: Promise<string> | null = null
 
 function isCsrfBootstrapRequest(requestUrl: string): boolean {
@@ -69,7 +69,13 @@ apiClient.interceptors.request.use(async (config) => {
     config.headers.set('Authorization', `Bearer ${accessToken}`)
   }
 
-  if (!STATE_CHANGING_METHODS.has(method) || isCsrfBootstrapRequest(requestUrl)) {
+  if (
+    !STATE_CHANGING_METHODS.has(method) ||
+    isCsrfBootstrapRequest(requestUrl) ||
+    isRefreshEndpoint(requestUrl) ||
+    shouldSilenceUnauthorized(requestUrl) ||
+    isSelfHandled401(requestUrl)
+  ) {
     return config
   }
 
@@ -147,12 +153,14 @@ export async function attemptTokenRefresh(): Promise<string | null> {
         if (newToken) {
           const currentUser = useAuthStore.getState().user
           if (currentUser) {
-            useAuthStore.getState().setAuth(currentUser, newToken)
+            useAuthStore.getState().setAuth(currentUser, newToken, { broadcast: false })
           }
+          broadcastAuthEvent({ type: 'token-refreshed', accessToken: newToken })
         }
         return newToken
       })
       .catch((err: unknown) => {
+        broadcastAuthEvent({ type: 'logout' })
         // Re-throw so callers know the refresh failed
         refreshPromise = null
         throw err
