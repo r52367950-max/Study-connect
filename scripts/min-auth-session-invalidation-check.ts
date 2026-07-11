@@ -119,6 +119,22 @@ class PrismaServiceMock {
     findMany: async () => [],
     count: async () => 0,
   };
+
+  // AdminService.banUser wraps its work in an interactive transaction and writes
+  // an AdminAuditLog row; without these the ban request 500s and the final
+  // invalidation assertions can never pass.
+  adminAuditLog = {
+    create: async () => ({}),
+  };
+
+  $transaction = async <T>(
+    arg: ((tx: PrismaServiceMock) => Promise<T>) | Array<Promise<T>>,
+  ): Promise<T | T[]> => {
+    if (Array.isArray(arg)) {
+      return Promise.all(arg);
+    }
+    return arg(this);
+  };
 }
 
 function getCookiePair(setCookieHeader: string | null): string {
@@ -353,5 +369,8 @@ async function run(): Promise<void> {
 
 run().catch((error: unknown) => {
   console.error(error);
-  process.exitCode = 1;
+  // Force-exit: a failed assertion skips app.close(), and the still-listening
+  // HTTP server would otherwise keep the process alive forever — min-all then
+  // hangs instead of reporting the failure.
+  process.exit(1);
 });

@@ -272,5 +272,7 @@ async function run(): Promise<void> {
 
 run().catch(async (error: unknown) => {
   console.error(error);
-  process.exitCode = 1;
+  // Force-exit: a failure skips app.close(), and the still-listening HTTP server
+  // would keep the process (and min-all / CI) hanging instead of failing fast.
+  process.exit(1);
 });

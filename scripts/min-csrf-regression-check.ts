@@ -198,19 +198,22 @@ function assertEqual<T>(actual: T, expected: T, label: string): void {
 
 async function discoverStateChangingRoutes(): Promise<string[]> {
   const routes: string[] = [];
-  const methodRegex = /@(Post|Put|Patch|Delete)\((?:'([^']*)')?\)/g;
+  // Accept both quote styles — materials.controller.ts is formatted with double
+  // quotes, and the single-quote-only regex silently dropped its write routes
+  // (POST /materials, POST /materials/:id/ratings) from the coverage check.
+  const methodRegex = /@(Post|Put|Patch|Delete)\((?:'([^']*)'|"([^"]*)")?\)/g;
 
   for (const relativePath of CONTROLLER_FILES) {
     const fileContent = await readFile(resolve(process.cwd(), relativePath), 'utf8');
-    const controllerMatch = fileContent.match(/@Controller\('([^']*)'\)/);
+    const controllerMatch = fileContent.match(/@Controller\((?:'([^']*)'|"([^"]*)")\)/);
     if (!controllerMatch) {
       continue;
     }
 
-    const controllerPrefix = controllerMatch[1];
+    const controllerPrefix = controllerMatch[1] ?? controllerMatch[2] ?? '';
     for (const match of fileContent.matchAll(methodRegex)) {
       const method = match[1].toUpperCase() as HttpMethod;
-      const subPath = match[2] ?? '';
+      const subPath = match[2] ?? match[3] ?? '';
       const fullPath = normalizePath(controllerPrefix, subPath);
       routes.push(`${method} ${fullPath}`);
     }
@@ -402,5 +405,7 @@ async function run(): Promise<void> {
 
 run().catch((error: unknown) => {
   console.error(error);
-  process.exitCode = 1;
+  // Force-exit: a failure skips app.close(), and the still-listening HTTP server
+  // would keep the process (and min-all / CI) hanging instead of failing fast.
+  process.exit(1);
 });
