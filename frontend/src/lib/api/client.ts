@@ -182,6 +182,14 @@ apiClient.interceptors.response.use(
     if (status === 401) {
       const requestUrl = config?.url
 
+      // The CSRF bootstrap request must never enter the refresh flow: the
+      // refresh POST itself awaits ensureCsrfToken(), which would await the
+      // still-pending bootstrap promise — a circular wait that hangs every
+      // state-changing request forever. Propagate so the bootstrap rejects.
+      if (isCsrfBootstrapRequest(requestUrl ?? '')) {
+        return Promise.reject(error)
+      }
+
       // Silent paths (e.g. /view-events): drop quietly, no refresh attempt
       if (shouldSilenceUnauthorized(requestUrl)) {
         return Promise.reject(error)
@@ -234,6 +242,30 @@ apiClient.interceptors.response.use(
 )
 
 // ─── Error message helper ─────────────────────────────────────────────────────
+// Backend machine codes → user-facing Chinese copy. Codes not listed fall
+// through to the raw message (better than hiding an unknown but real reason).
+const MESSAGE_TRANSLATIONS: Record<string, string> = {
+  UNSUPPORTED_FILE_TYPE: '不支持的文件类型',
+  FILE_EXTENSION_MISMATCH: '文件扩展名与文件类型不一致',
+  INVALID_FILE_SIGNATURE: '文件内容与所选格式不符',
+  'File exceeds size limit': '文件超过大小限制',
+  'Already favorited': '已收藏过该资料',
+  'Invalid credentials': '账号或密码错误',
+  'Invalid or expired OTP': '验证码错误或已过期',
+  DOWNLOAD_TOKEN_USED: '下载链接已被使用，请重新获取',
+  DOWNLOAD_TOKEN_EXPIRED: '下载链接已过期，请重新获取',
+  DOWNLOAD_TOKEN_NOT_FOUND: '下载链接无效，请重新获取',
+  MATERIAL_NOT_DOWNLOADABLE: '该资料暂不可下载',
+  USER_NOT_ACTIVE: '账号状态异常，无法下载',
+}
+
+function translateMessage(message: string): string {
+  if (MESSAGE_TRANSLATIONS[message]) return MESSAGE_TRANSLATIONS[message]
+  // Codes with a suffix, e.g. "UPLOAD_FILE_TOO_LARGE: max 50MB"
+  if (message.startsWith('UPLOAD_FILE_TOO_LARGE')) return '文件超过大小限制'
+  return message
+}
+
 export function getErrorMessage(error: unknown): string {
   if (error instanceof AxiosError) {
     const data = error.response?.data as
@@ -241,8 +273,8 @@ export function getErrorMessage(error: unknown): string {
       | undefined
 
     if (data?.message) {
-      if (Array.isArray(data.message)) return data.message.join('；')
-      if (typeof data.message === 'string') return data.message
+      if (Array.isArray(data.message)) return data.message.map(translateMessage).join('；')
+      if (typeof data.message === 'string') return translateMessage(data.message)
     }
 
     switch (error.response?.status) {

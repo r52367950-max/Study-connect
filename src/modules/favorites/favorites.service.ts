@@ -7,6 +7,25 @@ import { FavoritesQueryDto } from './dto/favorites-query.dto';
 export class FavoritesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * All favorited material ids for the current user, newest first. Backs the
+   * star-toggle state and the sidebar count — the paginated list() alone caps
+   * at one page, which made stars beyond it render unfavorited (and 409 on
+   * click). Bounded to keep the payload sane for pathological accounts.
+   */
+  async listIds(userId: string) {
+    const [rows, total] = await Promise.all([
+      this.prisma.favorite.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: 2000,
+        select: { materialId: true },
+      }),
+      this.prisma.favorite.count({ where: { userId } }),
+    ]);
+    return { items: rows.map((row) => row.materialId), total };
+  }
+
   async add(userId: string, materialId: string) {
     const material = await this.prisma.material.findUnique({
       where: { id: materialId },

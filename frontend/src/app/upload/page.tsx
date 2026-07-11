@@ -23,7 +23,10 @@ import {
 import { toast } from '@/components/ui/use-toast'
 import { cn } from '@/lib/utils'
 import { STAGES, SUBJECTS } from '@/components/onboarding/constants'
-const ALLOWED_EXTS = ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.zip', '.txt']
+// Must mirror the backend policy (src/modules/materials/upload-security.util.ts):
+// pdf / docx / pptx / zip / plain-text only. Legacy .doc/.ppt are NOT accepted
+// server-side — offering them here let a full upload finish before a 422.
+const ALLOWED_EXTS = ['.pdf', '.docx', '.pptx', '.zip', '.txt', '.text', '.md', '.csv', '.log']
 const MAX_SIZE_MB = 50
 
 const schema = z.object({

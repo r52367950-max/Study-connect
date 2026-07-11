@@ -43,5 +43,7 @@ async function run(): Promise<void> {
 
 void run().catch((error) => {
   console.error(error);
-  process.exitCode = 1;
+  // Force-exit: a failed run may still hold the Nest HTTP server open,
+  // which would hang the runner/CI instead of failing fast.
+  process.exit(1);
 });

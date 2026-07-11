@@ -163,6 +163,22 @@ function assertText(payload: Buffer): void {
 }
 
 
+/**
+ * Recover the user-facing filename (with extension) from an object key of the
+ * form `${date}/${uuid}-${sanitized-name}`. The stored name was produced by
+ * sanitizeFilename, but re-filter defensively (legacy keys) so callers can
+ * embed the result in headers/JSON without injection concerns.
+ */
+export function displayNameFromFileKey(fileKey: string, fallback: string): string {
+  const base = fileKey.split("/").pop() ?? "";
+  const withoutUuid = base.replace(
+    /^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}-/,
+    "",
+  );
+  const safe = withoutUuid.replace(/[^A-Za-z0-9._-]/g, "_");
+  return safe || fallback;
+}
+
 export function sanitizeFilename(name: string): string {
   const withoutControl = name.replace(/[\u0000-\u001F\u007F]/g, "");
   const basename = withoutControl.split(/[\/\\]/).pop() ?? "file";

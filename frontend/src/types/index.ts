@@ -82,6 +82,8 @@ export interface Material {
   year?: number | null
   region?: string | null
   fileKey?: string
+  /** Derived display filename from the detail endpoint (raw storage key stays private). */
+  fileName?: string | null
   visibility: MaterialVisibility
   status: MaterialStatus
   reviewComment?: string | null

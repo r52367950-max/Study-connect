@@ -100,5 +100,7 @@ async function run(): Promise<void> {
 
 run().catch((error) => {
   console.error('min-admin-audit-log-transaction-check failed:', error);
-  process.exitCode = 1;
+  // Force-exit: a failed run may still hold the Nest HTTP server open,
+  // which would hang the runner/CI instead of failing fast.
+  process.exit(1);
 });

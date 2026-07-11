@@ -10,6 +10,7 @@ import { FileSafetyStatus, MaterialStatus, UserStatus } from "@prisma/client";
 import { randomBytes } from "crypto";
 import { Response } from "express";
 import { MinioService, PrismaService } from "../../infra";
+import { displayNameFromFileKey } from "../materials/upload-security.util";
 import {
   DEFAULT_DOWNLOAD_TOKEN_TTL_SECONDS,
   DEFAULT_DOWNLOAD_URL_TTL_SECONDS,
@@ -141,7 +142,7 @@ export class DownloadsService {
     }
     res.setHeader(
       "content-disposition",
-      `attachment; filename="${material.id}"`,
+      `attachment; filename="${displayNameFromFileKey(material.fileKey, material.id)}"`,
     );
     res.setHeader("x-download-delivery-mode", "proxy");
     res.setHeader("x-download-policy-reason", policy.reason);
@@ -191,13 +192,19 @@ export class DownloadsService {
     userId: string,
     usedAt: Date,
   ) {
-    await this.prisma.$transaction([
-      (this.prisma as any).downloadToken.update({
-        where: { token },
+    await this.prisma.$transaction(async (tx) => {
+      // Atomic one-time claim: the usedAt-null condition makes two concurrent
+      // redemptions of the same token race on this update — exactly one wins.
+      // The earlier read-then-update flow let both pass the usedAt check and
+      // redeem a "one-time" token twice.
+      const claimed = await (tx as any).downloadToken.updateMany({
+        where: { token, usedAt: null },
         data: { usedAt },
-        select: { token: true },
-      }),
-      this.prisma.download.create({
+      });
+      if (claimed.count === 0) {
+        throw new GoneException("DOWNLOAD_TOKEN_USED");
+      }
+      await tx.download.create({
         data: { userId, materialId },
         select: {
           id: true,
@@ -205,13 +212,13 @@ export class DownloadsService {
           materialId: true,
           downloadedAt: true,
         },
-      }),
-      this.prisma.material.update({
+      });
+      await tx.material.update({
         where: { id: materialId },
         data: { downloadCount: { increment: 1 } },
         select: { id: true },
-      }),
-    ]);
+      });
+    });
   }
 
   private getBaseUrl(request?: {

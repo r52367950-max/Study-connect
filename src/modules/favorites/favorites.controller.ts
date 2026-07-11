@@ -20,6 +20,12 @@ export class FavoritesController {
     return this.favoritesService.list(req.user.id, query);
   }
 
+  @Get('ids')
+  @ApiOperation({ summary: "All favorited material ids (star state / sidebar count)" })
+  listIds(@Req() req: Request) {
+    return this.favoritesService.listIds(req.user.id);
+  }
+
   @Post(':materialId')
   @RateLimit({ name: 'favorites-add', limit: 60, windowMs: 60_000 })
   @ApiOperation({ summary: 'Favorite one material' })

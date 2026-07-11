@@ -58,7 +58,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   })()
   const { isLoggedIn, user, logout } = useAuth()
   const { data: profile } = useProfile()
-  const { data: favorites } = useFavorites()
+  const { favoritesCount } = useFavorites()
   const setCommandOpen = useCommandPaletteStore((s) => s.setOpen)
   const [openStages, setOpenStages] = useState<Record<string, boolean>>({})
   const autoExpanded = useRef(false)
@@ -136,7 +136,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <div className="space-y-0.5">
           {navItem('/', '首页', <Home className="h-4 w-4" />)}
           {navItem('/rank', '热门榜单', <TrendingUp className="h-4 w-4" />)}
-          {navItem('/favorites', '我的收藏', <Star className="h-4 w-4" />, favorites?.length)}
+          {navItem('/favorites', '我的收藏', <Star className="h-4 w-4" />, favoritesCount || undefined)}
         </div>
 
         <SectionLabel>学科</SectionLabel>

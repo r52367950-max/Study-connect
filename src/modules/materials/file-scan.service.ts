@@ -1,6 +1,6 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit, UnprocessableEntityException } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, UnprocessableEntityException } from '@nestjs/common';
 import { Socket } from 'node:net';
-import { FileSafetyStatus, FileScanJobStatus } from '@prisma/client';
+import { FileSafetyStatus, FileScanJob, FileScanJobStatus } from '@prisma/client';
 import { MinioService, PrismaService } from '../../infra';
 import { assertUploadFileSecurity, UploadSecurityStatus } from './upload-security.util';
 
@@ -34,6 +34,9 @@ export type FileScanResult = {
 export interface FileScanner {
   scan(file: FileScanPayload): Promise<FileScanResult>;
 }
+
+/** DI token for overriding the scanner implementation (defaults to createFileScannerFromEnv()). */
+export const FILE_SCANNER = Symbol('FILE_SCANNER');
 
 class LocalPolicyFileScanner implements FileScanner {
   async scan(file: FileScanPayload): Promise<FileScanResult> {
@@ -175,11 +178,19 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
   // B4: reentrance guard — skip tick if a previous batch hasn't finished yet
   private isRunning = false;
 
+  private readonly scanner: FileScanner;
+
+  // The scanner param must carry an injection token (with @Optional so it can be
+  // omitted): a bare `scanner: FileScanner = ...` default makes Nest try to resolve
+  // design:paramtype `Object` and the whole app fails to boot with an unresolvable
+  // dependency. Direct construction in scripts (positional 3rd arg) still works.
   constructor(
     private readonly prisma: PrismaService,
     private readonly minioService: MinioService,
-    private readonly scanner: FileScanner = createFileScannerFromEnv(),
-  ) {}
+    @Optional() @Inject(FILE_SCANNER) scanner?: FileScanner,
+  ) {
+    this.scanner = scanner ?? createFileScannerFromEnv();
+  }
 
   onModuleInit(): void {
     this.timer = setInterval(() => {

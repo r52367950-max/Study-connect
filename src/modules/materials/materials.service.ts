@@ -18,7 +18,11 @@ import {
 } from "./dto/material-search-query.dto";
 import { UploadFileInput } from "./file-upload.type";
 import { FileScanService } from "./file-scan.service";
-import { sanitizeFilename, stripControlChars } from "./upload-security.util";
+import {
+  displayNameFromFileKey,
+  sanitizeFilename,
+  stripControlChars,
+} from "./upload-security.util";
 
 export type UploadedMaterial = Pick<
   Material,
@@ -392,6 +396,7 @@ export class MaterialsService {
         visibility: true,
         createdAt: true,
         uploaderId: true,
+        fileKey: true,
         uploader: {
           select: {
             id: true,
@@ -404,11 +409,13 @@ export class MaterialsService {
       },
     });
 
-    const { downloadCount, ratingSum, ratingCount, ...base } = material;
+    const { downloadCount, ratingSum, ratingCount, fileKey, ...base } = material;
     return {
       ...base,
       // Mocked Prisma in min-* scripts may omit the relation; coerce to null for a stable shape.
       uploader: material.uploader ?? null,
+      // Derived display name only — the raw object key (internal storage path) stays private.
+      fileName: fileKey ? displayNameFromFileKey(fileKey, material.id) : null,
       avg_score: averageFromCounters(ratingSum, ratingCount),
       rating_count: ratingCount ?? 0,
       download_count: downloadCount ?? 0,

@@ -39,6 +39,9 @@ export class LoginDto {
   @ValidateIf((dto: LoginDto) => !dto.password)
   @IsString()
   @Length(6, 6)
+  // Codes are generated as 6 digits; rejecting other shapes up-front spares a
+  // pointless HMAC + DB lookup per junk attempt.
+  @Matches(/^\d{6}$/, { message: 'otpCode must be 6 digits' })
   @IsOptional()
   otpCode?: string;
 }
