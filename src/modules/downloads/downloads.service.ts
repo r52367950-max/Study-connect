@@ -141,12 +141,28 @@ export class DownloadsService {
     }
     res.setHeader(
       "content-disposition",
-      `attachment; filename="${material.id}"`,
+      `attachment; filename="${this.resolveDownloadFilename(material.fileKey, material.id)}"`,
     );
     res.setHeader("x-download-delivery-mode", "proxy");
     res.setHeader("x-download-policy-reason", policy.reason);
 
     return new StreamableFile(upstream.body as any);
+  }
+
+  /**
+   * Derive a user-facing filename (with extension) from the stored fileKey
+   * (`yyyy-mm-dd/<uuid>-<sanitized-name>`). Previously the header used the bare
+   * material UUID, so every proxied download saved as an extensionless file.
+   * sanitizeFilename already restricts names to [A-Za-z0-9._-]; the defensive
+   * re-filter keeps header injection impossible for legacy/foreign keys.
+   */
+  private resolveDownloadFilename(fileKey: string, fallback: string): string {
+    const basename = fileKey.split("/").pop() ?? "";
+    const match = basename.match(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-(.+)$/i,
+    );
+    const name = (match?.[1] ?? basename).replace(/[^A-Za-z0-9._-]/g, "_");
+    return name || fallback;
   }
 
   private async ensureDownloadableMaterial(

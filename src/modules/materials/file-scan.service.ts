@@ -1,6 +1,6 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit, UnprocessableEntityException } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, UnprocessableEntityException } from '@nestjs/common';
 import { Socket } from 'node:net';
-import { FileSafetyStatus, FileScanJobStatus } from '@prisma/client';
+import { FileSafetyStatus, FileScanJob, FileScanJobStatus } from '@prisma/client';
 import { MinioService, PrismaService } from '../../infra';
 import { assertUploadFileSecurity, UploadSecurityStatus } from './upload-security.util';
 
@@ -34,6 +34,14 @@ export type FileScanResult = {
 export interface FileScanner {
   scan(file: FileScanPayload): Promise<FileScanResult>;
 }
+
+/**
+ * DI token for the pluggable scanner. `FileScanner` is an interface, so Nest
+ * cannot resolve it from the constructor type alone (design:paramtypes emits
+ * `Object`); without this token + @Optional the app fails to boot with
+ * "can't resolve dependencies of the FileScanService".
+ */
+export const FILE_SCANNER = Symbol('FILE_SCANNER');
 
 class LocalPolicyFileScanner implements FileScanner {
   async scan(file: FileScanPayload): Promise<FileScanResult> {
@@ -178,7 +186,10 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly minioService: MinioService,
-    private readonly scanner: FileScanner = createFileScannerFromEnv(),
+    // @Optional makes Nest pass undefined when no FILE_SCANNER provider is bound,
+    // which lets the parameter default (env-configured scanner) kick in. Direct
+    // construction in scripts (new FileScanService(prisma, minio, scanner)) still works.
+    @Optional() @Inject(FILE_SCANNER) private readonly scanner: FileScanner = createFileScannerFromEnv(),
   ) {}
 
   onModuleInit(): void {

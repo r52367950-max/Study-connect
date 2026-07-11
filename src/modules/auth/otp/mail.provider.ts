@@ -66,5 +66,11 @@ export function createMailProvider(env: Record<string, string | undefined>): Mai
       env.SMTP_FROM ?? user,
     );
   }
+  // The console fallback prints OTP codes into server logs and never reaches the
+  // user — acceptable for dev, but in production a missing SMTP config must fail
+  // boot loudly (same policy as the rate-limit store's Redis requirement).
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Mail provider (SMTP_*) must be configured in production');
+  }
   return new ConsoleMailProvider();
 }

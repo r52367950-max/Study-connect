@@ -24,3 +24,26 @@ export function safeDecodeURIComponent(value: string): string {
     throw err;
   }
 }
+
+/**
+ * Extract a cookie value from a raw `Cookie` header. Shared by the auth
+ * controller, JWT guard and CSRF service so all three parse cookies the same
+ * way: entries are split on `;` and trimmed, only the first `=` separates
+ * name from value (the rest is joined back), and the scan stops at the first
+ * entry whose name matches and that actually has an `=`. A value that decodes
+ * to the empty string (including malformed percent-encoding, see
+ * safeDecodeURIComponent) is treated as "cookie not present" (null).
+ */
+export function getCookieValue(cookieHeader: string | undefined, name: string): string | null {
+  if (!cookieHeader) {
+    return null;
+  }
+  for (const entry of cookieHeader.split(';')) {
+    const [rawName, ...rawValue] = entry.trim().split('=');
+    if (rawName === name && rawValue.length > 0) {
+      const decoded = safeDecodeURIComponent(rawValue.join('='));
+      return decoded === '' ? null : decoded;
+    }
+  }
+  return null;
+}

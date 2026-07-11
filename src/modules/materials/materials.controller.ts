@@ -102,7 +102,9 @@ export class MaterialsController {
         collaborativeOptIn: profile.collaborativeOptIn,
         onboardedAt: profile.onboardedAt,
       },
-      { limit: query.limit, ranker: query.ranker, includeDebugSignals: req.user.role === UserRole.ADMIN || query.debug === true },
+      // debugSignals expose internal ranking internals — admin-only, and only on request
+      // (the DTO documents `debug` as 管理员可开启; OR here would leak them to any user).
+      { limit: query.limit, ranker: query.ranker, includeDebugSignals: req.user.role === UserRole.ADMIN && query.debug === true },
     );
     return { items, phase: items[0]?.phase ?? null };
   }

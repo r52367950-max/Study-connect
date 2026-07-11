@@ -8,8 +8,12 @@ import {
 import { UserRole } from '@prisma/client';
 import { Request, Response } from 'express';
 import { CsrfService } from '../../common/security/csrf.service';
+import {
+  resolveCookieSameSite,
+  resolveCookieSecure,
+} from '../../common/security/cookie-options';
 import { RateLimit } from '../../common/rate-limit.decorator';
-import { safeDecodeURIComponent } from '../../common/util';
+import { getCookieValue } from '../../common/util';
 import { Public } from './decorators/public.decorator';
 import { Roles } from './decorators/roles.decorator';
 import { AuthResponseDto, AuthUserDto } from './dto/auth-response.dto';
@@ -124,25 +128,7 @@ export class AuthController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<{ success: true }> {
     try {
-      const accessToken = this.extractCookieToken(req, 'auth-token');
-      if (accessToken) {
-        try {
-          const user = await this.authService.verifyAccessToken(accessToken);
-          await this.authService.rotateTokenVersion(user.id);
-        } catch {
-          const refreshToken = this.extractCookieToken(req, 'refresh-token');
-          if (refreshToken) {
-            const refreshPayload = this.authService.parseAndVerifyRefreshTokenForLogout(refreshToken);
-            await this.authService.rotateTokenVersion(refreshPayload.sub);
-          }
-        }
-      } else {
-        const refreshToken = this.extractCookieToken(req, 'refresh-token');
-        if (refreshToken) {
-          const refreshPayload = this.authService.parseAndVerifyRefreshTokenForLogout(refreshToken);
-          await this.authService.rotateTokenVersion(refreshPayload.sub);
-        }
-      }
+      await this.invalidateSessionFromCookies(req);
     } catch {
       // logout should never throw to the client
     } finally {
@@ -150,6 +136,30 @@ export class AuthController {
     }
 
     return { success: true };
+  }
+
+  /**
+   * Best-effort session invalidation for logout: try the access token first;
+   * if it is missing or invalid, fall back to the refresh token. Errors from
+   * the refresh path propagate to the caller (logout swallows them).
+   */
+  private async invalidateSessionFromCookies(req: Request): Promise<void> {
+    const accessToken = this.extractCookieToken(req, 'auth-token');
+    if (accessToken) {
+      try {
+        const user = await this.authService.verifyAccessToken(accessToken);
+        await this.authService.rotateTokenVersion(user.id);
+        return;
+      } catch {
+        // fall through to the refresh token
+      }
+    }
+
+    const refreshToken = this.extractCookieToken(req, 'refresh-token');
+    if (refreshToken) {
+      const refreshPayload = this.authService.parseAndVerifyRefreshTokenForLogout(refreshToken);
+      await this.authService.rotateTokenVersion(refreshPayload.sub);
+    }
   }
 
   @Post('change-password')
@@ -217,30 +227,15 @@ export class AuthController {
   }
 
   private extractCookieToken(request: Request, key: 'auth-token' | 'refresh-token'): string {
-    const cookieHeader = request.headers.cookie;
-    if (!cookieHeader) {
-      return '';
-    }
-    const cookieEntries = cookieHeader.split(';');
-    for (const entry of cookieEntries) {
-      const [rawName, ...rawValue] = entry.trim().split('=');
-      if (rawName === key && rawValue.length > 0) {
-        return safeDecodeURIComponent(rawValue.join('='));
-      }
-    }
-    return '';
+    return getCookieValue(request.headers.cookie, key) ?? '';
   }
 
   private getCookieSecure(): boolean {
-    return process.env.AUTH_COOKIE_SECURE === 'true';
+    return resolveCookieSecure(process.env.AUTH_COOKIE_SECURE);
   }
 
   private getCookieSameSite(): 'lax' | 'strict' | 'none' {
-    const sameSite = (process.env.AUTH_COOKIE_SAMESITE ?? 'lax').toLowerCase();
-    if (sameSite === 'strict' || sameSite === 'none') {
-      return sameSite;
-    }
-    return 'lax';
+    return resolveCookieSameSite(process.env.AUTH_COOKIE_SAMESITE);
   }
 
   private getAccessTtlMilliseconds(): number {

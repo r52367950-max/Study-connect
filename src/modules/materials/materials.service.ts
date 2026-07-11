@@ -48,8 +48,11 @@ export type UploadedMaterial = Pick<
  * (min positive similarity ≈ 1/union-trigrams; 0.001 covers texts up to ~1000
  * trigrams). Applied via SET LOCAL inside the same transaction as the query so
  * pooled connections never leak the setting.
+ *
+ * Exported: SearchService (/search/suggestions) uses the same `%`-driven
+ * pattern and must pin the identical threshold.
  */
-const TRGM_MIN_SIMILARITY = 0.001;
+export const TRGM_MIN_SIMILARITY = 0.001;
 
 @Injectable()
 export class MaterialsService {
@@ -135,10 +138,9 @@ export class MaterialsService {
 
     if (query.q && query.q.trim() && sort !== MaterialSort.RATING) {
       const q = query.q.trim();
-      // `title % q` / `description % q` drive a BitmapOr over the two GIN trigram
-      // indexes; ordering still ranks by exact similarity() on the matched rows only.
-      // `description % q` is NULL (falsy) for NULL descriptions, matching the old
-      // similarity(COALESCE(description,''), q) > 0 which was always false there.
+      // `title % q` / `description % q` (see buildApprovedRawWhere) drive a BitmapOr
+      // over the two GIN trigram indexes; ordering still ranks by exact similarity()
+      // on the matched rows only.
       const rows = await this.runWithTrgmThreshold(
         this.prisma.$queryRaw<
           Array<{
@@ -167,15 +169,7 @@ export class MaterialsService {
           m.rating_count AS "ratingCount",
           COUNT(*) OVER()::bigint AS "totalCount"
         FROM materials m
-        WHERE m.status = 'APPROVED'
-          AND m.visibility = 'PUBLIC'
-          AND (m.file_safety_status = 'PASSED' OR m.file_safety_status IS NULL)
-          AND (${query.subject ?? null}::text IS NULL OR LOWER(m.subject) = LOWER(${query.subject ?? null}))
-          AND (${query.stage ?? null}::text IS NULL OR LOWER(m.stage) = LOWER(${query.stage ?? null}))
-          AND (${query.grade ?? null}::text IS NULL OR LOWER(m.grade) = LOWER(${query.grade ?? null}))
-          AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
-          AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
-          AND (m.title % ${q} OR m.description % ${q})
+        WHERE ${this.buildApprovedRawWhere(query, { mode: "required", q })}
         ORDER BY (similarity(m.title, ${q}) + similarity(COALESCE(m.description, ''), ${q})) DESC, m.created_at DESC
         LIMIT ${pageSize} OFFSET ${skip}
       `),
@@ -189,15 +183,7 @@ export class MaterialsService {
           this.prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`
           SELECT COUNT(*)::bigint AS total
           FROM materials m
-          WHERE m.status = 'APPROVED'
-            AND m.visibility = 'PUBLIC'
-            AND (m.file_safety_status = 'PASSED' OR m.file_safety_status IS NULL)
-            AND (${query.subject ?? null}::text IS NULL OR LOWER(m.subject) = LOWER(${query.subject ?? null}))
-            AND (${query.stage ?? null}::text IS NULL OR LOWER(m.stage) = LOWER(${query.stage ?? null}))
-            AND (${query.grade ?? null}::text IS NULL OR LOWER(m.grade) = LOWER(${query.grade ?? null}))
-            AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
-            AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
-            AND (m.title % ${q} OR m.description % ${q})
+          WHERE ${this.buildApprovedRawWhere(query, { mode: "required", q })}
         `),
         );
         total = countRows[0] ? Number(countRows[0].total) : 0;
@@ -230,10 +216,10 @@ export class MaterialsService {
       // (rating_sum/rating_count/download_count) instead of per-row correlated
       // subqueries, which ran 2 indexed scans on ratings + 1 on downloads for every
       // candidate row (≈30k scans per page on a 15k-material corpus).
-      // C1: subject/stage/grade/region compared case-insensitively (LOWER = LOWER), matching
-      //     buildApprovedWhere's `mode: 'insensitive'` so rating sort returns the same set as other sorts.
-      // C2: when `q` is supplied, keep the keyword (trigram) filter — the keyword branch above only
-      //     runs for non-RATING sorts, so without this `?q=...&sort=rating` would ignore the keyword.
+      // C1 (case-insensitive facets) and C2 (keyword filter — the keyword branch above
+      // only runs for non-RATING sorts, so without it `?q=...&sort=rating` would ignore
+      // the keyword) live in buildApprovedRawWhere; keyword mode "optional" keeps the
+      // filter a no-op when q is absent.
       const q = query.q && query.q.trim() ? query.q.trim() : null;
       const ratingRows = await this.runWithTrgmThreshold(
         this.prisma.$queryRaw<
@@ -263,15 +249,7 @@ export class MaterialsService {
           m.download_count AS download_count,
           COUNT(*) OVER()::bigint AS total_count
         FROM materials m
-        WHERE m.status = 'APPROVED'
-          AND m.visibility = 'PUBLIC'
-          AND (m.file_safety_status = 'PASSED' OR m.file_safety_status IS NULL)
-          AND (${query.subject ?? null}::text IS NULL OR LOWER(m.subject) = LOWER(${query.subject ?? null}))
-          AND (${query.stage ?? null}::text IS NULL OR LOWER(m.stage) = LOWER(${query.stage ?? null}))
-          AND (${query.grade ?? null}::text IS NULL OR LOWER(m.grade) = LOWER(${query.grade ?? null}))
-          AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
-          AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
-          AND (${q}::text IS NULL OR m.title % ${q} OR m.description % ${q})
+        WHERE ${this.buildApprovedRawWhere(query, { mode: "optional", q })}
         ORDER BY avg_score DESC NULLS LAST, rating_count DESC, m.created_at DESC
         LIMIT ${pageSize} OFFSET ${skip}
       `),
@@ -286,15 +264,7 @@ export class MaterialsService {
           this.prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`
           SELECT COUNT(*)::bigint AS total
           FROM materials m
-          WHERE m.status = 'APPROVED'
-            AND m.visibility = 'PUBLIC'
-            AND (m.file_safety_status = 'PASSED' OR m.file_safety_status IS NULL)
-            AND (${query.subject ?? null}::text IS NULL OR LOWER(m.subject) = LOWER(${query.subject ?? null}))
-            AND (${query.stage ?? null}::text IS NULL OR LOWER(m.stage) = LOWER(${query.stage ?? null}))
-            AND (${query.grade ?? null}::text IS NULL OR LOWER(m.grade) = LOWER(${query.grade ?? null}))
-            AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
-            AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
-            AND (${q}::text IS NULL OR m.title % ${q} OR m.description % ${q})
+          WHERE ${this.buildApprovedRawWhere(query, { mode: "optional", q })}
         `),
         );
         total = countRows[0] ? Number(countRows[0].total) : 0;
@@ -672,6 +642,50 @@ export class MaterialsService {
         ? { region: { equals: query.region, mode: "insensitive" } }
         : {}),
     };
+  }
+
+  /**
+   * WHERE body shared by the four raw-SQL queries over public approved
+   * materials (keyword search + RATING sort, each with its out-of-range COUNT
+   * fallback). Filters, in order:
+   * - review status APPROVED + visibility PUBLIC;
+   * - file-safety gate: PASSED or pre-scan legacy NULL — must mirror
+   *   buildApprovedWhere / ensurePublicApprovedMaterial, otherwise unscanned
+   *   rows leak into lists and then 404 on click/download;
+   * - optional subject/stage/grade/region/year facets (NULL parameter = filter
+   *   off). Text facets compare LOWER = LOWER, matching buildApprovedWhere's
+   *   `mode: 'insensitive'` (C1) so raw branches return the same set as the
+   *   Prisma-query branches;
+   * - trigram keyword predicate:
+   *   - "required": `(title % q OR description % q)` — the keyword-search
+   *     branch always has a keyword;
+   *   - "optional": `(q IS NULL OR title % q OR description % q)` — the RATING
+   *     branch binds q as a nullable parameter (C2) so one statement serves
+   *     both with- and without-keyword requests.
+   *   `description % q` is NULL (falsy) for NULL descriptions, matching the old
+   *   similarity(COALESCE(description, ''), q) > 0 which was always false
+   *   there. `%` compares against pg_trgm.similarity_threshold — always run
+   *   queries embedding this fragment via runWithTrgmThreshold.
+   */
+  private buildApprovedRawWhere(
+    query: MaterialSearchQueryDto,
+    keyword:
+      | { mode: "required"; q: string }
+      | { mode: "optional"; q: string | null },
+  ): Prisma.Sql {
+    const keywordSql =
+      keyword.mode === "required"
+        ? Prisma.sql`(m.title % ${keyword.q} OR m.description % ${keyword.q})`
+        : Prisma.sql`(${keyword.q}::text IS NULL OR m.title % ${keyword.q} OR m.description % ${keyword.q})`;
+    return Prisma.sql`m.status = 'APPROVED'
+          AND m.visibility = 'PUBLIC'
+          AND (m.file_safety_status = 'PASSED' OR m.file_safety_status IS NULL)
+          AND (${query.subject ?? null}::text IS NULL OR LOWER(m.subject) = LOWER(${query.subject ?? null}))
+          AND (${query.stage ?? null}::text IS NULL OR LOWER(m.stage) = LOWER(${query.stage ?? null}))
+          AND (${query.grade ?? null}::text IS NULL OR LOWER(m.grade) = LOWER(${query.grade ?? null}))
+          AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
+          AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
+          AND ${keywordSql}`;
   }
 
   private buildOrderBy(

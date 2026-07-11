@@ -87,5 +87,11 @@ export function createSmsProvider(env: Record<string, string | undefined>): SmsP
   if (id && secret && sign && template) {
     return new AliyunSmsProvider(id, secret, sign, template, env.ALIYUN_SMS_ENDPOINT);
   }
+  // The console fallback prints OTP codes into server logs and never reaches the
+  // user — acceptable for dev, but in production a missing SMS config must fail
+  // boot loudly (same policy as the rate-limit store's Redis requirement).
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('SMS provider (ALIYUN_SMS_*) must be configured in production');
+  }
   return new ConsoleSmsProvider();
 }

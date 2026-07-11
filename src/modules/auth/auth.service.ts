@@ -134,18 +134,14 @@ export class AuthService {
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
-    let user;
-    try {
-      user = await this.prisma.user.findFirst({
-        where: dto.email ? { email: identifier } : { phone: identifier },
-      });
-    } catch {
-      user = await this.prisma.user.findFirst({
-        where: {
-          OR: [dto.email ? { email: identifier } : { phone: identifier }],
-        },
-      });
-    }
+    // Single-condition OR is equivalent to the bare condition in Prisma; the
+    // OR shape is kept because the scripts/min-* Prisma mocks only implement
+    // user.findFirst for `where.OR` queries.
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [dto.email ? { email: identifier } : { phone: identifier }],
+      },
+    });
 
     const userStatus = user?.status ?? UserStatus.ACTIVE;
     if (!user || userStatus === UserStatus.BANNED) {

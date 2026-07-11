@@ -23,7 +23,10 @@ import {
 import { toast } from '@/components/ui/use-toast'
 import { cn } from '@/lib/utils'
 import { STAGES, SUBJECTS } from '@/components/onboarding/constants'
-const ALLOWED_EXTS = ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.zip', '.txt']
+// Must mirror the backend allowlist (upload-security.util.ts FILE_POLICIES):
+// legacy .doc/.ppt are NOT accepted there (no application/msword MIME), so
+// offering them here only produces a guaranteed 422 after the upload starts.
+const ALLOWED_EXTS = ['.pdf', '.docx', '.pptx', '.zip', '.txt', '.md', '.csv', '.log']
 const MAX_SIZE_MB = 50
 
 const schema = z.object({

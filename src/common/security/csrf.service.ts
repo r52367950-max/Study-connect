@@ -2,7 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { Response } from 'express';
-import { safeDecodeURIComponent } from '../util';
+import { getCookieValue } from '../util';
+import { resolveCookieSameSite, resolveCookieSecure } from './cookie-options';
 
 const CSRF_COOKIE_NAME = 'csrf-token';
 const CSRF_HEADER_NAME = 'x-csrf-token';
@@ -34,19 +35,11 @@ export class CsrfService {
   }
 
   extractCsrfCookie(cookieHeader?: string): string | null {
-    if (!cookieHeader) {
+    const decoded = getCookieValue(cookieHeader, CSRF_COOKIE_NAME);
+    if (decoded === null) {
       return null;
     }
-
-    const cookieEntries = cookieHeader.split(';');
-    for (const entry of cookieEntries) {
-      const [rawName, ...rawValue] = entry.trim().split('=');
-      if (rawName === CSRF_COOKIE_NAME && rawValue.length > 0) {
-        const decoded = safeDecodeURIComponent(rawValue.join('='));
-        return this.isWellFormedToken(decoded) ? decoded : null;
-      }
-    }
-    return null;
+    return this.isWellFormedToken(decoded) ? decoded : null;
   }
 
   tokensMatch(cookieToken: string, headerToken: string): boolean {
@@ -65,14 +58,10 @@ export class CsrfService {
   }
 
   private getCookieSecure(): boolean {
-    return this.configService.get<string>('AUTH_COOKIE_SECURE') === 'true';
+    return resolveCookieSecure(this.configService.get<string>('AUTH_COOKIE_SECURE'));
   }
 
   private getCookieSameSite(): 'lax' | 'strict' | 'none' {
-    const sameSite = (this.configService.get<string>('AUTH_COOKIE_SAMESITE') ?? 'lax').toLowerCase();
-    if (sameSite === 'strict' || sameSite === 'none') {
-      return sameSite;
-    }
-    return 'lax';
+    return resolveCookieSameSite(this.configService.get<string>('AUTH_COOKIE_SAMESITE'));
   }
 }
