@@ -9,6 +9,13 @@ services:
       - "3000:3000"
     env_file:
       - .env
+    environment:
+      # Inside the compose network, services resolve by name. These override the
+      # localhost-oriented values in .env (which target host-machine dev): with
+      # the .env defaults the api container would dial itself instead of the
+      # postgres/minio containers and every DB/upload call would fail.
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/study_connect?schema=public"
+      MINIO_ENDPOINT: "minio"
     depends_on:
       postgres:
         condition: service_healthy

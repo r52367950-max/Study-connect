@@ -4,6 +4,8 @@ import { apiClient } from '@/lib/api/client'
 describe('api client csrf interceptor', () => {
   const originalAdapter = apiClient.defaults.adapter
   const originalDocument = globalThis.document
+  // Must satisfy the client's 64-hex CSRF token shape check
+  const TEST_CSRF = 'a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4'
 
   afterEach(() => {
     apiClient.defaults.adapter = originalAdapter
@@ -17,7 +19,7 @@ describe('api client csrf interceptor', () => {
 
   it('adds x-csrf-token header for state-changing requests', async () => {
     Object.defineProperty(globalThis, 'document', {
-      value: { cookie: 'csrf-token=test-csrf-token' },
+      value: { cookie: `csrf-token=${TEST_CSRF}` },
       configurable: true,
       writable: true,
     })
@@ -39,7 +41,7 @@ describe('api client csrf interceptor', () => {
         ? requestConfig.headers.get('x-csrf-token')
         : requestConfig.headers?.['x-csrf-token']
 
-    expect(csrfHeader).toBe('test-csrf-token')
+    expect(csrfHeader).toBe(TEST_CSRF)
   })
 
   it('does not recurse csrf bootstrap when request url is absolute', async () => {

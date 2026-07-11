@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { Star, Download } from 'lucide-react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { MaterialRowItem } from '@/types'
-import { addFavorite, removeFavorite } from '@/lib/api/favorites'
+import { addFavorite, removeFavorite, type FavoriteIds } from '@/lib/api/favorites'
 import { reportViewEvent } from '@/lib/api/view-events'
 import { getErrorMessage } from '@/lib/api/client'
 import { useAuth } from '@/hooks/use-auth'
@@ -77,18 +77,23 @@ export function MaterialRow({ material }: MaterialRowProps) {
     // Optimistic update: flip the star immediately without waiting for the RTT.
     onMutate: async () => {
       await queryClient.cancelQueries({ queryKey: ['favorites'] })
-      const prev = queryClient.getQueryData<ReturnType<typeof Array>>(['favorites'])
-      queryClient.setQueryData<MaterialRowItem[] | undefined>(['favorites'], (old) => {
+      const prev = queryClient.getQueryData<FavoriteIds>(['favorites', 'ids'])
+      queryClient.setQueryData<FavoriteIds | undefined>(['favorites', 'ids'], (old) => {
         if (!old) return old
-        if (isFav) return old.filter((m: MaterialRowItem) => m.id !== material.id)
-        return [...old, material]
+        if (isFav) {
+          return {
+            items: old.items.filter((id) => id !== material.id),
+            total: Math.max(old.total - 1, 0),
+          }
+        }
+        return { items: [material.id, ...old.items], total: old.total + 1 }
       })
       return { prev }
     },
     onError: (err, _vars, ctx) => {
       // Roll back to the snapshot on error
       if (ctx?.prev !== undefined) {
-        queryClient.setQueryData(['favorites'], ctx.prev)
+        queryClient.setQueryData(['favorites', 'ids'], ctx.prev)
       }
       toast({ variant: 'destructive', title: '操作失败', description: getErrorMessage(err) })
     },

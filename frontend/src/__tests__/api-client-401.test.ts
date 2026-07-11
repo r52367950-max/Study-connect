@@ -42,7 +42,7 @@ describe('api client 401 handling', () => {
     Object.defineProperty(globalThis, 'document', {
       configurable: true,
       writable: true,
-      value: { cookie: 'csrf-token=test-csrf' },
+      value: { cookie: 'csrf-token=a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4' },
     })
 
     Object.defineProperty(window, 'location', {

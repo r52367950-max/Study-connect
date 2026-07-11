@@ -198,19 +198,21 @@ function assertEqual<T>(actual: T, expected: T, label: string): void {
 
 async function discoverStateChangingRoutes(): Promise<string[]> {
   const routes: string[] = [];
-  const methodRegex = /@(Post|Put|Patch|Delete)\((?:'([^']*)')?\)/g;
+  // Accept both quote styles — Prettier leaves some controllers double-quoted,
+  // and a single-quote-only regex silently dropped those files' write routes.
+  const methodRegex = /@(Post|Put|Patch|Delete)\((?:'([^']*)'|"([^"]*)")?\)/g;
 
   for (const relativePath of CONTROLLER_FILES) {
     const fileContent = await readFile(resolve(process.cwd(), relativePath), 'utf8');
-    const controllerMatch = fileContent.match(/@Controller\('([^']*)'\)/);
+    const controllerMatch = fileContent.match(/@Controller\((?:'([^']*)'|"([^"]*)")\)/);
     if (!controllerMatch) {
-      continue;
+      throw new Error(`csrf-regression: no @Controller() prefix found in ${relativePath}`);
     }
 
-    const controllerPrefix = controllerMatch[1];
+    const controllerPrefix = controllerMatch[1] ?? controllerMatch[2];
     for (const match of fileContent.matchAll(methodRegex)) {
       const method = match[1].toUpperCase() as HttpMethod;
-      const subPath = match[2] ?? '';
+      const subPath = match[2] ?? match[3] ?? '';
       const fullPath = normalizePath(controllerPrefix, subPath);
       routes.push(`${method} ${fullPath}`);
     }
@@ -402,5 +404,7 @@ async function run(): Promise<void> {
 
 run().catch((error: unknown) => {
   console.error(error);
-  process.exitCode = 1;
+  // Force-exit: a failed run may still hold the Nest HTTP server open,
+  // which would hang the runner/CI instead of failing fast.
+  process.exit(1);
 });

@@ -222,7 +222,7 @@ export default function MaterialDetailPage() {
                 <FileText className="h-4 w-4 text-muted-foreground" />
                 <span className="text-muted-foreground">文件</span>
                 <span className="ml-auto font-medium">
-                  {material.fileKey?.split('/').pop() ?? '资料文件'}
+                  {material.fileName ?? material.fileKey?.split('/').pop() ?? '资料文件'}
                 </span>
               </div>
 

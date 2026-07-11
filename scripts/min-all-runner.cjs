@@ -21,6 +21,9 @@ const checks = [
   'test:min-cors-config',
   'test:min-auth-token-hardening',
   'test:min-file-scan-async',
+  'test:min-file-scan-claim-concurrency',
+  'test:min-rate-limit-shared-store',
+  'test:min-admin-audit-log-transaction',
 ];
 
 const results = [];

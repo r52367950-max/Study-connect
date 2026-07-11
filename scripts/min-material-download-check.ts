@@ -203,6 +203,21 @@ class PrismaServiceMock {
       if (item) item.usedAt = data.usedAt;
       return { token: where.token };
     },
+    // Mirrors the service's atomic one-time claim: only an unused token matches.
+    updateMany: async ({
+      where,
+      data,
+    }: {
+      where: { token: string; usedAt: null };
+      data: { usedAt: Date };
+    }) => {
+      const item = this.downloadTokens.find(
+        (candidate) => candidate.token === where.token && candidate.usedAt === null,
+      );
+      if (!item) return { count: 0 };
+      item.usedAt = data.usedAt;
+      return { count: 1 };
+    },
   };
 
   download = {
@@ -537,5 +552,7 @@ async function run(): Promise<void> {
 
 run().catch((error: unknown) => {
   console.error(error);
-  process.exitCode = 1;
+  // Force-exit: a failed run may still hold the Nest HTTP server open,
+  // which would hang the runner/CI instead of failing fast.
+  process.exit(1);
 });

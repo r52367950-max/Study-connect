@@ -31,7 +31,7 @@ describe('auth flow regression', () => {
       },
     } as never)
 
-    const data = await login({ email: mockUser.email, password: 'password123' })
+    const data = await login({ email: mockUser.email ?? undefined, password: 'password123' })
     useAuthStore.getState().setAuth(data.user, data.accessToken)
 
     expect(useAuthStore.getState().user).toEqual(mockUser)

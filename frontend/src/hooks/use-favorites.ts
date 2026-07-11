@@ -2,27 +2,29 @@
 
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getFavorites } from '@/lib/api/favorites'
+import { getFavoriteIds, type FavoriteIds } from '@/lib/api/favorites'
 import { useAuthStore } from '@/lib/auth-store'
 
 /**
- * Fetch the current user's favorited materials. Skipped when not logged in.
- * Backs both the favorites page and the star toggle on every <MaterialRow>,
- * so the sidebar count and star state stay in sync via the ['favorites'] key.
+ * Full favorite-id set + total count for the current user. Skipped when not
+ * logged in. Backs the star toggle on every <MaterialRow> and the sidebar
+ * badge via the ['favorites', 'ids'] key; the favorites PAGE fetches its own
+ * paginated list under ['favorites', 'list', page]. Both share the
+ * ['favorites'] prefix so one invalidation refreshes everything.
  */
 export function useFavorites() {
   const user = useAuthStore((s) => s.user)
-  const query = useQuery({
-    queryKey: ['favorites'],
-    queryFn: getFavorites,
+  const query = useQuery<FavoriteIds>({
+    queryKey: ['favorites', 'ids'],
+    queryFn: getFavoriteIds,
     enabled: Boolean(user),
     staleTime: 60 * 1000,
   })
 
   const favoriteIds = useMemo(
-    () => new Set((query.data ?? []).map((m) => m.id)),
+    () => new Set(query.data?.items ?? []),
     [query.data],
   )
 
-  return { ...query, favoriteIds }
+  return { ...query, favoriteIds, favoritesCount: query.data?.total ?? 0 }
 }
