@@ -1,12 +1,19 @@
 'use client'
 
 import { Suspense, useEffect } from 'react'
+import dynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Sidebar, MobileSidebar } from '@/components/layout/sidebar'
 import { Topbar } from '@/components/layout/topbar'
-import { CommandPalette } from '@/components/shared/command-palette'
 import { GradeUpgradeDialog } from '@/components/shared/grade-upgrade-dialog'
 import { toast } from '@/components/ui/use-toast'
+
+// The command palette (and its `cmdk` dependency) is only needed once the user hits ⌘K, and it
+// renders nothing until then — code-split it out of every (app) route's initial bundle.
+const CommandPalette = dynamic(
+  () => import('@/components/shared/command-palette').then((m) => m.CommandPalette),
+  { ssr: false },
+)
 
 const DIRB_ENABLED = process.env.NEXT_PUBLIC_DIRB_ENABLED !== 'false'
 

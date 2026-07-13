@@ -198,11 +198,14 @@ function assertEqual<T>(actual: T, expected: T, label: string): void {
 
 async function discoverStateChangingRoutes(): Promise<string[]> {
   const routes: string[] = [];
-  const methodRegex = /@(Post|Put|Patch|Delete)\((?:'([^']*)')?\)/g;
+  // Accept both single- and double-quoted decorator arguments. A single-quote-only regex silently
+  // skipped an entire controller written with double quotes (e.g. materials.controller.ts), which
+  // meant its write routes went unchecked for CSRF coverage — a blind spot in this security guard.
+  const methodRegex = /@(Post|Put|Patch|Delete)\((?:['"]([^'"]*)['"])?\)/g;
 
   for (const relativePath of CONTROLLER_FILES) {
     const fileContent = await readFile(resolve(process.cwd(), relativePath), 'utf8');
-    const controllerMatch = fileContent.match(/@Controller\('([^']*)'\)/);
+    const controllerMatch = fileContent.match(/@Controller\(['"]([^'"]*)['"]\)/);
     if (!controllerMatch) {
       continue;
     }

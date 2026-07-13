@@ -119,6 +119,17 @@ class PrismaServiceMock {
     findMany: async () => [],
     count: async () => 0,
   };
+
+  adminAuditLog = {
+    create: async () => ({}),
+  };
+
+  // Mirrors Prisma's interactive-transaction form: banUser wraps its
+  // findUnique/update/adminAuditLog.create in prisma.$transaction(async (tx) => ...).
+  // Running the callback with `this` as the tx client keeps the same in-memory user state.
+  async $transaction<T>(fn: (tx: this) => Promise<T>): Promise<T> {
+    return fn(this);
+  }
 }
 
 function getCookiePair(setCookieHeader: string | null): string {

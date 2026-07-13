@@ -9,7 +9,13 @@ import { useRouter } from 'next/navigation'
 import { useCallback } from 'react'
 
 export function useAuth() {
-  const { user, initialized, setAuth, clearAuth } = useAuthStore()
+  // Select individual fields rather than the whole store: consumers (every MaterialRow, the
+  // sidebar, etc.) then re-render only when user/initialized change — not on every background
+  // token refresh, which writes accessToken via setAuth ~every 15 min.
+  const user = useAuthStore((s) => s.user)
+  const initialized = useAuthStore((s) => s.initialized)
+  const setAuth = useAuthStore((s) => s.setAuth)
+  const clearAuth = useAuthStore((s) => s.clearAuth)
   const queryClient = useQueryClient()
   const router = useRouter()
 

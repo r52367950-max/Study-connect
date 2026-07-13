@@ -85,7 +85,13 @@ export default function MaterialDetailPage() {
     try {
       setDownloading(true)
       const { downloadUrl } = await downloadMaterial(id)
-      window.open(downloadUrl, '_blank', 'noopener,noreferrer')
+      // Defense-in-depth: only open http(s) URLs. Guards against a misconfigured/compromised
+      // backend returning a javascript:/data: URL that would execute in the app context.
+      const parsed = new URL(downloadUrl, window.location.origin)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error('Unexpected download URL')
+      }
+      window.open(parsed.toString(), '_blank', 'noopener,noreferrer')
     } catch (err) {
       toast({ variant: 'destructive', title: '下载失败', description: getErrorMessage(err) })
     } finally {

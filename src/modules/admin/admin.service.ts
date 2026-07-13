@@ -49,6 +49,48 @@ export class AdminService {
     };
   }
 
+  async getMaterialScanDetails(materialId: string) {
+    const material = await this.prisma.material.findUnique({
+      where: { id: materialId },
+      select: {
+        id: true,
+        title: true,
+        fileSafetyStatus: true,
+        fileScanJob: {
+          select: {
+            id: true,
+            status: true,
+            attempts: true,
+            lastError: true,
+            scheduledAt: true,
+            updatedAt: true,
+            reports: {
+              orderBy: { createdAt: 'desc' },
+              take: 10,
+              select: {
+                id: true,
+                verdict: true,
+                engine: true,
+                engineVersion: true,
+                signature: true,
+                riskReasons: true,
+                scanDurationMs: true,
+                rawSummary: true,
+                createdAt: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!material) {
+      throw new NotFoundException('Material not found');
+    }
+
+    return material;
+  }
+
   async getAuditLogs(query: { targetId?: string; adminId?: string; page: number; pageSize: number }) {
     const skip = (query.page - 1) * query.pageSize;
     const where: Prisma.AdminAuditLogWhereInput = {

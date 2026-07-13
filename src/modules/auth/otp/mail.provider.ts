@@ -66,5 +66,12 @@ export function createMailProvider(env: Record<string, string | undefined>): Mai
       env.SMTP_FROM ?? user,
     );
   }
+  // The console fallback logs OTP codes in cleartext — acceptable for local dev only. Refuse to
+  // start in production without a real mail provider rather than silently leak live codes to logs.
+  if (env.NODE_ENV === 'production') {
+    throw new Error(
+      'Mail OTP provider is not configured in production. Set SMTP_* env vars; the console provider (which logs codes in cleartext) is disabled in production.',
+    );
+  }
   return new ConsoleMailProvider();
 }

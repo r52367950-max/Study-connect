@@ -88,7 +88,7 @@ describe('api client token refresh interceptor', () => {
     Object.defineProperty(globalThis, 'document', {
       configurable: true,
       writable: true,
-      value: { cookie: 'csrf-token=test-csrf' },
+      value: { cookie: 'csrf-token=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' },
     })
 
     Object.defineProperty(window, 'location', {

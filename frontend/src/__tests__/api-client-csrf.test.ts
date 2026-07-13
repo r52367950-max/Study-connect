@@ -17,7 +17,7 @@ describe('api client csrf interceptor', () => {
 
   it('adds x-csrf-token header for state-changing requests', async () => {
     Object.defineProperty(globalThis, 'document', {
-      value: { cookie: 'csrf-token=test-csrf-token' },
+      value: { cookie: 'csrf-token=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' },
       configurable: true,
       writable: true,
     })
@@ -39,7 +39,7 @@ describe('api client csrf interceptor', () => {
         ? requestConfig.headers.get('x-csrf-token')
         : requestConfig.headers?.['x-csrf-token']
 
-    expect(csrfHeader).toBe('test-csrf-token')
+    expect(csrfHeader).toBe('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef')
   })
 
   it('does not recurse csrf bootstrap when request url is absolute', async () => {

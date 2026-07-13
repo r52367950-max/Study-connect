@@ -87,5 +87,12 @@ export function createSmsProvider(env: Record<string, string | undefined>): SmsP
   if (id && secret && sign && template) {
     return new AliyunSmsProvider(id, secret, sign, template, env.ALIYUN_SMS_ENDPOINT);
   }
+  // The console fallback logs OTP codes in cleartext — acceptable for local dev only. Refuse to
+  // start in production without a real SMS provider rather than silently leak live codes to logs.
+  if (env.NODE_ENV === 'production') {
+    throw new Error(
+      'SMS OTP provider is not configured in production. Set ALIYUN_SMS_* env vars; the console provider (which logs codes in cleartext) is disabled in production.',
+    );
+  }
   return new ConsoleSmsProvider();
 }

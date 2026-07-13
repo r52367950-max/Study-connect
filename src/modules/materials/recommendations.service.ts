@@ -51,7 +51,27 @@ export type RecommendationItem = {
 };
 
 type CandidateSource = 'profile' | 'popular' | 'school' | 'recent';
-type CandidateMaterial = Material & { candidateSources: CandidateSource[] };
+
+// Only the columns the Ranker actually reads. Projecting these keeps candidate rows narrow
+// (drops fileKey, reviewComment, status, visibility, fileSafetyStatus, uploaderId, updatedAt)
+// so up to ~300 candidates/recommend request aren't fully hydrated and deserialized.
+const CANDIDATE_SELECT = {
+  id: true,
+  title: true,
+  description: true,
+  subject: true,
+  stage: true,
+  grade: true,
+  kind: true,
+  year: true,
+  region: true,
+  downloadCount: true,
+  ratingSum: true,
+  ratingCount: true,
+} satisfies Prisma.MaterialSelect;
+
+type CandidateFields = Prisma.MaterialGetPayload<{ select: typeof CANDIDATE_SELECT }>;
+type CandidateMaterial = CandidateFields & { candidateSources: CandidateSource[] };
 
 const DEFAULT_LIMIT = 6;
 const SCHOOL_DENSITY_MIN = 10;
@@ -101,6 +121,7 @@ export class CandidateProvider {
       where: { ...PUBLIC_APPROVED_WHERE, AND: [{ OR: or }] },
       orderBy: [{ downloadCount: 'desc' }, { createdAt: 'desc' }],
       take: config.candidateLimits.profile,
+      select: CANDIDATE_SELECT,
     });
   }
 
@@ -109,6 +130,7 @@ export class CandidateProvider {
       where: PUBLIC_APPROVED_WHERE,
       orderBy: [{ downloadCount: 'desc' }, { ratingCount: 'desc' }, { createdAt: 'desc' }],
       take: config.candidateLimits.popular,
+      select: CANDIDATE_SELECT,
     });
   }
 
@@ -117,6 +139,7 @@ export class CandidateProvider {
       where: PUBLIC_APPROVED_WHERE,
       orderBy: { createdAt: 'desc' },
       take: config.candidateLimits.recent,
+      select: CANDIDATE_SELECT,
     });
   }
 
@@ -144,10 +167,13 @@ export class CandidateProvider {
   }
 
   private materialsByIds(ids: string[]) {
-    return this.prisma.material.findMany({ where: { ...PUBLIC_APPROVED_WHERE, id: { in: ids } } });
+    return this.prisma.material.findMany({
+      where: { ...PUBLIC_APPROVED_WHERE, id: { in: ids } },
+      select: CANDIDATE_SELECT,
+    });
   }
 
-  private mergeCandidates(groups: { source: CandidateSource; materials: Material[] }[]): CandidateMaterial[] {
+  private mergeCandidates(groups: { source: CandidateSource; materials: CandidateFields[] }[]): CandidateMaterial[] {
     const merged = new Map<string, CandidateMaterial>();
     for (const group of groups) {
       for (const material of group.materials) {

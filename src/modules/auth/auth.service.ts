@@ -149,6 +149,13 @@ export class AuthService {
 
     const userStatus = user?.status ?? UserStatus.ACTIVE;
     if (!user || userStatus === UserStatus.BANNED) {
+      // Equalize timing with the real password path: a genuine user runs one scrypt in
+      // verifyPassword, so burn an equivalent scrypt here against a decoy hash. Without this,
+      // the scrypt cost is an observable oracle distinguishing "user exists" from "no such user"
+      // despite the identical error message (user enumeration).
+      if (dto.password) {
+        await this.verifyPassword(dto.password, await this.getDecoyPasswordHash());
+      }
       // Avoid leaking which side failed; record + throw same error
       await this.recordLoginFailure(identifier, ipAddress);
       throw new UnauthorizedException('Invalid credentials');
@@ -312,6 +319,17 @@ export class AuthService {
     const salt = randomBytes(16).toString('hex');
     const derived = (await scryptAsync(password, salt, 64)) as Buffer;
     return `${salt}:${derived.toString('hex')}`;
+  }
+
+  // Lazily-computed decoy hash used only to equalize login timing on the no-such-user path.
+  // The plaintext is a random throwaway; only the scrypt cost of verifying against it matters.
+  private decoyPasswordHash: Promise<string> | null = null;
+
+  private getDecoyPasswordHash(): Promise<string> {
+    if (!this.decoyPasswordHash) {
+      this.decoyPasswordHash = this.hashPassword(randomBytes(32).toString('hex'));
+    }
+    return this.decoyPasswordHash;
   }
 
   private async verifyPassword(password: string, stored: string): Promise<boolean> {
