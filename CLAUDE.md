@@ -41,8 +41,9 @@ security-hardening passes — security work in this repo has a formal gate (see 
 │       ├── favorites/          # list/add/remove favorites
 │       ├── schools/            # school lookup
 │       ├── view-events/        # POST /view-events (personalization signal)
-│       ├── admin/              # pending list, approve/reject/offline material, ban user
-│       ├── reviews/, downloads/, search/  # currently thin/placeholder modules
+│       ├── admin/              # pending list, approve/reject/offline material, ban user, scan details
+│       ├── downloads/          # download-token issue/redeem + delivery policy (proxy/direct)
+│       └── search/             # GET /search/suggestions (pg_trgm-backed)
 ├── prisma/
 │   ├── schema.prisma           # DB schema (PostgreSQL). Migrations dir is git-ignored.
 │   └── seed.ts                 # `prisma db seed` — schools only; sample materials intentionally not seeded (use the real upload path)

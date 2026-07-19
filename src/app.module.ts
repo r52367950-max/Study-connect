@@ -14,7 +14,6 @@ import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { DownloadsModule } from './modules/downloads/downloads.module';
 import { FavoritesModule } from './modules/favorites/favorites.module';
 import { MaterialsModule } from './modules/materials/materials.module';
-import { ReviewsModule } from './modules/reviews/reviews.module';
 import { SchoolsModule } from './modules/schools/schools.module';
 import { SearchModule } from './modules/search/search.module';
 import { UsersModule } from './modules/users/users.module';
@@ -63,7 +62,6 @@ const appGuardProviders: Provider[] = APP_GUARD_CHAIN.map((guardClass: Type<unkn
     SchoolsModule,
     ViewEventsModule,
     AdminModule,
-    ReviewsModule,
     DownloadsModule,
     SearchModule,
     HealthModule,
