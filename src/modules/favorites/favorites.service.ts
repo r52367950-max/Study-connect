@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { MaterialStatus, MaterialVisibility, Prisma } from '@prisma/client';
+import { FileSafetyStatus, MaterialStatus, MaterialVisibility, Prisma } from '@prisma/client';
 import { PrismaService } from '../../infra';
 import { FavoritesQueryDto } from './dto/favorites-query.dto';
 
@@ -10,9 +10,17 @@ export class FavoritesService {
   async add(userId: string, materialId: string) {
     const material = await this.prisma.material.findUnique({
       where: { id: materialId },
-      select: { id: true, status: true, visibility: true },
+      select: { id: true, status: true, visibility: true, fileSafetyStatus: true },
     });
-    if (!material || material.status !== MaterialStatus.APPROVED || material.visibility !== MaterialVisibility.PUBLIC) {
+    // Same visibility invariant as list/detail/download: APPROVED + PUBLIC + scan
+    // PASSED (or null for pre-scan legacy rows). A quarantined/failed upload 404s
+    // everywhere else, so it must not be favoritable by id either.
+    if (
+      !material ||
+      material.status !== MaterialStatus.APPROVED ||
+      material.visibility !== MaterialVisibility.PUBLIC ||
+      (material.fileSafetyStatus !== FileSafetyStatus.PASSED && material.fileSafetyStatus !== null)
+    ) {
       throw new NotFoundException('Material not available');
     }
 

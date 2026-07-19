@@ -25,6 +25,10 @@ const CODE_LENGTH = 6;
 // Cap failed verification attempts so a 6-digit code (1e6 space) cannot be
 // brute-forced within its TTL. Window is the same as the code TTL.
 const VERIFY_MAX_ATTEMPTS = 5;
+// Data-minimization retention for OtpAttempt rows (they hold a raw email/phone
+// plus the sender IP). Must exceed every accounting window above (daily cap =
+// 24h); matches the offline scripts/cleanup-otp-attempts.ts retention.
+const ATTEMPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const FAILURE_SENTINEL = '__invalid__';
 
 @Injectable()
@@ -82,6 +86,19 @@ export class OtpService {
     }
 
     this.logger.log({ event: 'OTP_SEND_SUCCESS', channel: input.channel, purpose: input.purpose, identifier: maskIdentifier(input.identifier) });
+
+    // Opportunistic purge of this identifier's aged-out attempts, so PII does not
+    // sit in the table indefinitely when the offline cleanup script isn't
+    // scheduled. Scoped to the (identifier, createdAt) index; fire-and-forget —
+    // a failed purge must never fail the send.
+    this.prisma.otpAttempt
+      .deleteMany({
+        where: {
+          identifier: input.identifier,
+          createdAt: { lt: new Date(Date.now() - ATTEMPT_RETENTION_MS) },
+        },
+      })
+      .catch(() => undefined);
 
     return {
       cooldownSeconds: Math.ceil(RESEND_COOLDOWN_MS / 1000),

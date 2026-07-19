@@ -11,7 +11,14 @@ export class ViewEventsService {
 
   async log(userId: string, dto: LogViewEventDto) {
     const material = await this.prisma.material.findFirst({
-      where: { id: dto.materialId, status: 'APPROVED', visibility: 'PUBLIC' },
+      where: {
+        id: dto.materialId,
+        status: 'APPROVED',
+        visibility: 'PUBLIC',
+        // Mirror the public-surface invariant (detail 404s for non-PASSED files),
+        // so personalization never learns from materials the user cannot open.
+        OR: [{ fileSafetyStatus: 'PASSED' }, { fileSafetyStatus: null }],
+      },
       select: { id: true, kind: true },
     });
     if (!material) return { logged: false };
