@@ -1,6 +1,6 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit, UnprocessableEntityException } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, UnprocessableEntityException } from '@nestjs/common';
 import { Socket } from 'node:net';
-import { FileSafetyStatus, FileScanJobStatus } from '@prisma/client';
+import { FileSafetyStatus, FileScanJob, FileScanJobStatus } from '@prisma/client';
 import { MinioService, PrismaService } from '../../infra';
 import { assertUploadFileSecurity, UploadSecurityStatus } from './upload-security.util';
 
@@ -34,6 +34,9 @@ export type FileScanResult = {
 export interface FileScanner {
   scan(file: FileScanPayload): Promise<FileScanResult>;
 }
+
+/** DI token for overriding the scanner engine (FileScanner is an interface, so it cannot be a token itself). */
+export const FILE_SCANNER = Symbol('FILE_SCANNER');
 
 class LocalPolicyFileScanner implements FileScanner {
   async scan(file: FileScanPayload): Promise<FileScanResult> {
@@ -174,12 +177,18 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
   private readonly scannerId = process.env.FILE_SCAN_INSTANCE_ID ?? `${process.pid}-${Math.random().toString(36).slice(2)}`;
   // B4: reentrance guard — skip tick if a previous batch hasn't finished yet
   private isRunning = false;
+  private readonly scanner: FileScanner;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly minioService: MinioService,
-    private readonly scanner: FileScanner = createFileScannerFromEnv(),
-  ) {}
+    // Optional token injection: a bare interface-typed default param has no DI
+    // metadata, so Nest failed to resolve index [2] and the whole app crashed
+    // at boot. Providers may bind FILE_SCANNER; otherwise env config decides.
+    @Optional() @Inject(FILE_SCANNER) scanner?: FileScanner,
+  ) {
+    this.scanner = scanner ?? createFileScannerFromEnv();
+  }
 
   onModuleInit(): void {
     this.timer = setInterval(() => {

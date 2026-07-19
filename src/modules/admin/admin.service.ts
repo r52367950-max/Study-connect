@@ -74,6 +74,49 @@ export class AdminService {
     };
   }
 
+  async getMaterialScanDetails(materialId: string) {
+    const material = await this.prisma.material.findUnique({
+      where: { id: materialId },
+      select: { id: true, title: true, status: true, fileSafetyStatus: true },
+    });
+    if (!material) {
+      throw new NotFoundException('Material not found');
+    }
+
+    const [job, reports] = await Promise.all([
+      this.prisma.fileScanJob.findUnique({
+        where: { materialId },
+        select: {
+          id: true,
+          status: true,
+          attempts: true,
+          lastError: true,
+          scheduledAt: true,
+          nextRunAt: true,
+          failedAt: true,
+          updatedAt: true,
+        },
+      }),
+      this.prisma.fileScanReport.findMany({
+        where: { materialId },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+        select: {
+          id: true,
+          verdict: true,
+          engine: true,
+          engineVersion: true,
+          signature: true,
+          riskReasons: true,
+          scanDurationMs: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    return { material, job, reports };
+  }
+
   async approveMaterial(materialId: string, adminId: string, context: AuditContext = {}) {
     return this.updateMaterialReview(
       materialId,
