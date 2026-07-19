@@ -17,6 +17,22 @@ type DbUser = {
 class PrismaServiceMock {
   private users: DbUser[] = [];
 
+  // banUser runs inside prisma.$transaction((tx) => ...) and writes an audit log;
+  // hand the mock itself over as the transaction client.
+  $transaction = async (arg: unknown): Promise<unknown> => {
+    if (Array.isArray(arg)) {
+      return Promise.all(arg);
+    }
+    return (arg as (tx: PrismaServiceMock) => Promise<unknown>)(this);
+  };
+
+  adminAuditLog = {
+    create: async ({ data }: { data: Record<string, unknown> }) => ({
+      id: crypto.randomUUID(),
+      ...data,
+    }),
+  };
+
   user = {
     findFirst: async ({ where }: { where: { OR: Array<{ email?: string; username?: string }> } }) => {
       const found = this.users.find((user) =>
@@ -353,5 +369,8 @@ async function run(): Promise<void> {
 
 run().catch((error: unknown) => {
   console.error(error);
-  process.exitCode = 1;
+  // process.exit (not exitCode): on the failure path the Nest HTTP server is
+  // still listening, so a live handle would keep the process (and the whole
+  // min-all runner) hanging forever.
+  process.exit(1);
 });

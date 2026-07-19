@@ -198,13 +198,16 @@ function assertEqual<T>(actual: T, expected: T, label: string): void {
 
 async function discoverStateChangingRoutes(): Promise<string[]> {
   const routes: string[] = [];
-  const methodRegex = /@(Post|Put|Patch|Delete)\((?:'([^']*)')?\)/g;
+  // Quote-agnostic: controllers formatted with double quotes (e.g.
+  // materials.controller.ts) must not silently drop out of route discovery —
+  // a missing file makes the coverage assertion fail, never pass vacuously.
+  const methodRegex = /@(Post|Put|Patch|Delete)\((?:['"]([^'"]*)['"])?\)/g;
 
   for (const relativePath of CONTROLLER_FILES) {
     const fileContent = await readFile(resolve(process.cwd(), relativePath), 'utf8');
-    const controllerMatch = fileContent.match(/@Controller\('([^']*)'\)/);
+    const controllerMatch = fileContent.match(/@Controller\(['"]([^'"]*)['"]\)/);
     if (!controllerMatch) {
-      continue;
+      throw new Error(`csrf-regression: no @Controller prefix found in ${relativePath}`);
     }
 
     const controllerPrefix = controllerMatch[1];

@@ -9,6 +9,17 @@ class PrismaMock {
     upsert: async ({ create }: any) => { this.job = { id: 'j1', attempts: 0, updatedAt: new Date(), ...create }; },
     findMany: async () => (this.job ? [this.job] : []),
     update: async ({ data }: any) => { this.job = { ...this.job, ...data, updatedAt: new Date() }; return this.job; },
+    // claimPendingJobs claims via a conditional updateMany inside $transaction.
+    // Claim only PENDING jobs (nextRunAt scheduling is intentionally ignored so
+    // the retry test can re-run immediately); terminal DEAD_LETTER stays parked.
+    updateMany: async ({ where, data }: any) => {
+      if (!this.job || this.job.id !== where.id || this.job.status !== FileScanJobStatus.PENDING) {
+        return { count: 0 };
+      }
+      this.job = { ...this.job, ...data, updatedAt: new Date() };
+      return { count: 1 };
+    },
+    findUnique: async ({ where }: any) => (this.job && this.job.id === where.id ? this.job : null),
   };
   fileScanReport = {
     create: async ({ data }: any) => { this.reports.push({ id: `r${this.reports.length + 1}`, ...data }); return this.reports.at(-1); },
@@ -67,7 +78,7 @@ async function assertEicarFileFails() {
   await service.enqueueScan('m2', '2026-05-16/eicar.txt');
   await service.runPendingScans();
   if ((prisma.materialStatus as FileSafetyStatus | null) !== FileSafetyStatus.FAILED) throw new Error('EICAR material not marked FAILED');
-  if (prisma.job.status !== FileScanJobStatus.FAILED) throw new Error('EICAR job not FAILED');
+  if (prisma.job.status !== FileScanJobStatus.DEAD_LETTER) throw new Error('EICAR job not DEAD_LETTER');
   if (prisma.reports[0]?.signature !== 'EICAR-Test-File') throw new Error('EICAR signature not persisted');
 }
 
@@ -84,7 +95,7 @@ async function assertTimeoutRetriesThenTimesOut() {
     await service.runPendingScans();
     await service.runPendingScans();
     if ((prisma.materialStatus as FileSafetyStatus | null) !== FileSafetyStatus.TIMEOUT) throw new Error('timeout material not marked TIMEOUT');
-    if (prisma.job.status !== FileScanJobStatus.FAILED || prisma.job.attempts !== 3) throw new Error('timeout job not terminal after max attempts');
+    if (prisma.job.status !== FileScanJobStatus.DEAD_LETTER || prisma.job.attempts !== 3) throw new Error('timeout job not terminal after max attempts');
   } finally {
     if (previous === undefined) delete process.env.FILE_SCAN_TIMEOUT_MS;
     else process.env.FILE_SCAN_TIMEOUT_MS = previous;
