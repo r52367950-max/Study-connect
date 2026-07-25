@@ -38,7 +38,8 @@
     "recommend:evaluate": "ts-node scripts/evaluate-ranker.ts",
     "test:min-admin-audit-log-transaction": "ts-node scripts/min-admin-audit-log-transaction-check.ts",
     "test:min-file-scan-claim-concurrency": "ts-node scripts/min-file-scan-claim-concurrency-check.ts",
-    "test:min-rate-limit-shared-store": "ts-node scripts/min-rate-limit-shared-store-check.ts"
+    "test:min-rate-limit-shared-store": "ts-node scripts/min-rate-limit-shared-store-check.ts",
+    "test:min-rate-limit-redis-store": "ts-node scripts/min-rate-limit-redis-store-check.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"

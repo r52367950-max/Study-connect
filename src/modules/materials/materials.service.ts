@@ -7,6 +7,7 @@ import {
   Prisma,
 } from "@prisma/client";
 import { randomUUID } from "crypto";
+import { runWithTrgmThreshold } from "../../common/pg-trgm";
 import { MinioService, PrismaService } from "../../infra";
 import { DownloadsService } from "../downloads/downloads.service";
 import { CreateMaterialDto } from "./dto/create-material.dto";
@@ -39,17 +40,32 @@ export type UploadedMaterial = Pick<
 >;
 
 /**
- * Trigram threshold backing the keyword search's `%` operator. The previous
- * predicate `similarity(col, q) > 0` could not use the GIN trigram indexes
- * (function call on the left side), forcing a per-row similarity() over every
- * approved material. `col % q` is index-driven but compares against the
- * pg_trgm.similarity_threshold GUC, so each search SETs it LOCAL-ly to a value
- * small enough to keep the original "shares at least one trigram" recall
- * (min positive similarity ≈ 1/union-trigrams; 0.001 covers texts up to ~1000
- * trigrams). Applied via SET LOCAL inside the same transaction as the query so
- * pooled connections never leak the setting.
+ * Shared predicate for every public keyword-search branch below.
+ *
+ * All four raw-SQL branches (keyword page, keyword count, rating page, rating
+ * count) must filter identically — a divergence between them is what previously
+ * let rows appear in one branch's results and 404 on click, or made pagination
+ * totals disagree with the page contents. Building the clause once removes the
+ * chance of them drifting apart again.
+ *
+ * `keyword` is optional so the rating branch can reuse it with `q` absent.
  */
-const TRGM_MIN_SIMILARITY = 0.001;
+function approvedPublicWhere(
+  query: MaterialSearchQueryDto,
+  keyword: string | null,
+): Prisma.Sql {
+  return Prisma.sql`
+    m.status = 'APPROVED'
+    AND m.visibility = 'PUBLIC'
+    AND (m.file_safety_status = 'PASSED' OR m.file_safety_status IS NULL)
+    AND (${query.subject ?? null}::text IS NULL OR LOWER(m.subject) = LOWER(${query.subject ?? null}))
+    AND (${query.stage ?? null}::text IS NULL OR LOWER(m.stage) = LOWER(${query.stage ?? null}))
+    AND (${query.grade ?? null}::text IS NULL OR LOWER(m.grade) = LOWER(${query.grade ?? null}))
+    AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
+    AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
+    AND (${keyword}::text IS NULL OR m.title % ${keyword} OR m.description % ${keyword})
+  `;
+}
 
 @Injectable()
 export class MaterialsService {
@@ -167,15 +183,7 @@ export class MaterialsService {
           m.rating_count AS "ratingCount",
           COUNT(*) OVER()::bigint AS "totalCount"
         FROM materials m
-        WHERE m.status = 'APPROVED'
-          AND m.visibility = 'PUBLIC'
-          AND (m.file_safety_status = 'PASSED' OR m.file_safety_status IS NULL)
-          AND (${query.subject ?? null}::text IS NULL OR LOWER(m.subject) = LOWER(${query.subject ?? null}))
-          AND (${query.stage ?? null}::text IS NULL OR LOWER(m.stage) = LOWER(${query.stage ?? null}))
-          AND (${query.grade ?? null}::text IS NULL OR LOWER(m.grade) = LOWER(${query.grade ?? null}))
-          AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
-          AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
-          AND (m.title % ${q} OR m.description % ${q})
+        WHERE ${approvedPublicWhere(query, q)}
         ORDER BY (similarity(m.title, ${q}) + similarity(COALESCE(m.description, ''), ${q})) DESC, m.created_at DESC
         LIMIT ${pageSize} OFFSET ${skip}
       `),
@@ -189,15 +197,7 @@ export class MaterialsService {
           this.prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`
           SELECT COUNT(*)::bigint AS total
           FROM materials m
-          WHERE m.status = 'APPROVED'
-            AND m.visibility = 'PUBLIC'
-            AND (m.file_safety_status = 'PASSED' OR m.file_safety_status IS NULL)
-            AND (${query.subject ?? null}::text IS NULL OR LOWER(m.subject) = LOWER(${query.subject ?? null}))
-            AND (${query.stage ?? null}::text IS NULL OR LOWER(m.stage) = LOWER(${query.stage ?? null}))
-            AND (${query.grade ?? null}::text IS NULL OR LOWER(m.grade) = LOWER(${query.grade ?? null}))
-            AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
-            AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
-            AND (m.title % ${q} OR m.description % ${q})
+          WHERE ${approvedPublicWhere(query, q)}
         `),
         );
         total = countRows[0] ? Number(countRows[0].total) : 0;
@@ -263,15 +263,7 @@ export class MaterialsService {
           m.download_count AS download_count,
           COUNT(*) OVER()::bigint AS total_count
         FROM materials m
-        WHERE m.status = 'APPROVED'
-          AND m.visibility = 'PUBLIC'
-          AND (m.file_safety_status = 'PASSED' OR m.file_safety_status IS NULL)
-          AND (${query.subject ?? null}::text IS NULL OR LOWER(m.subject) = LOWER(${query.subject ?? null}))
-          AND (${query.stage ?? null}::text IS NULL OR LOWER(m.stage) = LOWER(${query.stage ?? null}))
-          AND (${query.grade ?? null}::text IS NULL OR LOWER(m.grade) = LOWER(${query.grade ?? null}))
-          AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
-          AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
-          AND (${q}::text IS NULL OR m.title % ${q} OR m.description % ${q})
+        WHERE ${approvedPublicWhere(query, q)}
         ORDER BY avg_score DESC NULLS LAST, rating_count DESC, m.created_at DESC
         LIMIT ${pageSize} OFFSET ${skip}
       `),
@@ -286,15 +278,7 @@ export class MaterialsService {
           this.prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`
           SELECT COUNT(*)::bigint AS total
           FROM materials m
-          WHERE m.status = 'APPROVED'
-            AND m.visibility = 'PUBLIC'
-            AND (m.file_safety_status = 'PASSED' OR m.file_safety_status IS NULL)
-            AND (${query.subject ?? null}::text IS NULL OR LOWER(m.subject) = LOWER(${query.subject ?? null}))
-            AND (${query.stage ?? null}::text IS NULL OR LOWER(m.stage) = LOWER(${query.stage ?? null}))
-            AND (${query.grade ?? null}::text IS NULL OR LOWER(m.grade) = LOWER(${query.grade ?? null}))
-            AND (${query.region ?? null}::text IS NULL OR LOWER(m.region) = LOWER(${query.region ?? null}))
-            AND (${query.year ?? null}::int IS NULL OR m.year = ${query.year ?? null})
-            AND (${q}::text IS NULL OR m.title % ${q} OR m.description % ${q})
+          WHERE ${approvedPublicWhere(query, q)}
         `),
         );
         total = countRows[0] ? Number(countRows[0].total) : 0;
@@ -600,38 +584,6 @@ export class MaterialsService {
     return material as Prisma.MaterialGetPayload<{ select: TSelect }>;
   }
 
-  private async ensureDownloadablePublicMaterial(
-    materialId: string,
-  ): Promise<{ id: string; fileKey: string }> {
-    const material = await this.ensurePublicApprovedMaterial(materialId, {
-      select: {
-        id: true,
-        fileKey: true,
-        fileSafetyStatus: true,
-      },
-    });
-
-    // Defense-in-depth tripwire: ensurePublicApprovedMaterial only returns PASSED/null rows,
-    // but if its filter ever regresses, block the download here and raise the alert.
-    if (
-      material.fileSafetyStatus !== FileSafetyStatus.PASSED &&
-      material.fileSafetyStatus !== null
-    ) {
-      this.logger.warn({
-        event: "SECURITY_ALERT_DOWNLOAD_BLOCKED",
-        materialId,
-        fileSafetyStatus: material.fileSafetyStatus,
-        timestamp: new Date().toISOString(),
-      });
-      throw new NotFoundException("Material not found");
-    }
-
-    return {
-      id: material.id,
-      fileKey: material.fileKey,
-    };
-  }
-
   private buildApprovedWhere(
     query: MaterialSearchQueryDto,
   ): Prisma.MaterialWhereInput {
@@ -650,14 +602,10 @@ export class MaterialsService {
           ],
         },
       ],
-      ...(query.q
-        ? {
-            OR: [
-              { title: { contains: query.q, mode: "insensitive" } },
-              { description: { contains: query.q, mode: "insensitive" } },
-            ],
-          }
-        : {}),
+      // No keyword clause here on purpose: every branch that has a `q` goes
+      // through the raw trigram SQL above, so this builder only ever runs for
+      // keyword-less queries. A `contains` OR-clause here would additionally have
+      // collided with the `AND` key below and silently replaced it.
       ...(query.stage
         ? { stage: { equals: query.stage, mode: "insensitive" } }
         : {}),
@@ -698,20 +646,9 @@ export class MaterialsService {
     return [{ createdAt: "desc" }];
   }
 
-  /**
-   * Runs a raw trigram query in a batch transaction that first pins
-   * pg_trgm.similarity_threshold (SET LOCAL — scoped to the transaction, so the
-   * pooled connection is left untouched). See TRGM_MIN_SIMILARITY.
-   */
+  /** See src/common/pg-trgm.ts — shared with SearchService so both pin the same GUC. */
   private runWithTrgmThreshold<T>(query: Prisma.PrismaPromise<T>): Promise<T> {
-    return this.prisma
-      .$transaction([
-        this.prisma.$executeRaw(
-          Prisma.sql`SET LOCAL pg_trgm.similarity_threshold = ${Prisma.raw(String(TRGM_MIN_SIMILARITY))}`,
-        ),
-        query,
-      ])
-      .then((results) => results[1] as T);
+    return runWithTrgmThreshold(this.prisma, query);
   }
 }
 

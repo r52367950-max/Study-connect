@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createHash } from 'crypto';
 import { createConnection, Socket } from 'net';
 import { connect as createTlsConnection, TLSSocket } from 'tls';
 import { URL } from 'url';
@@ -182,9 +183,16 @@ class MinimalRedisClient implements OnModuleDestroy {
 
   async command(args: Array<string | number>): Promise<RedisValue> {
     await this.connect();
+    // Capture the socket rather than dereferencing this.socket inside the
+    // executor: a stale connection's teardown can null the field between the
+    // await and the write, which previously threw "cannot read 'write' of null".
+    const socket = this.socket;
+    if (!socket || socket.destroyed) {
+      throw new Error('Redis socket is not connected');
+    }
     return new Promise<RedisValue>((resolve, reject) => {
       this.queue.push({ resolve, reject });
-      this.socket!.write(this.encode(args));
+      socket.write(this.encode(args));
     });
   }
 
@@ -214,9 +222,18 @@ class MinimalRedisClient implements OnModuleDestroy {
           .then(() => resolve())
           .catch(reject);
       });
-      socket.on('data', (chunk) => this.handleData(chunk));
-      socket.on('error', (err) => this.rejectAll(err));
+      // Every handler below is bound to *this* socket, but they mutate state shared
+      // across reconnects. Ignore events from a connection that has already been
+      // superseded — otherwise a stale socket's late 'close' nulls out the live
+      // one and rejects commands that belong to it.
+      socket.on('data', (chunk) => {
+        if (this.socket === socket) this.handleData(chunk);
+      });
+      socket.on('error', (err) => {
+        if (this.socket === socket) this.rejectAll(err);
+      });
       socket.on('close', () => {
+        if (this.socket !== socket) return;
         this.socket = null;
         this.buffer = Buffer.alloc(0);
         // Settle anything still in flight. Without this, commands issued just
@@ -310,6 +327,8 @@ class MinimalRedisClient implements OnModuleDestroy {
 
 class RedisRateLimitStore implements RateLimitStore {
   private readonly client: MinimalRedisClient;
+  /** script body -> SHA1, so the digest is computed once per script, not per request. */
+  private readonly scriptShaCache = new Map<string, string>();
 
   private readonly counterScript = `
 local current = redis.call('INCR', KEYS[1])
@@ -358,7 +377,7 @@ return { locked, lockUntil }
 
   async checkAndConsume(input: RateLimitConsumeInput): Promise<RateLimitDecision> {
     const key = this.key(`counter:${input.ruleName}:${input.key}`);
-    const result = await this.client.command(['EVAL', this.counterScript, 1, key, input.windowMs]);
+    const result = await this.evalScript(this.counterScript, key, [input.windowMs]);
     const [countRaw, ttlRaw] = Array.isArray(result) ? result : [0, 0];
     const count = Number(countRaw);
     const ttl = Math.max(Number(ttlRaw), 1);
@@ -399,9 +418,44 @@ return { locked, lockUntil }
   }
 
   private async recordOneFailure(key: string, now: number, failureWindowMs: number, maxFailures: number, lockMs: number): Promise<boolean> {
-    const result = await this.client.command(['EVAL', this.loginFailureScript, 1, this.key(`lock:${key}`), now, failureWindowMs, maxFailures, lockMs]);
+    const result = await this.evalScript(this.loginFailureScript, this.key(`lock:${key}`), [
+      now,
+      failureWindowMs,
+      maxFailures,
+      lockMs,
+    ]);
     const [lockedRaw] = Array.isArray(result) ? result : [0];
     return Number(lockedRaw) === 1;
+  }
+
+  /**
+   * Run a Lua script by SHA, falling back to a full EVAL when the server does not
+   * have it cached.
+   *
+   * Plain EVAL shipped the entire script body with every single rate-limited
+   * request — on the hot path for all traffic. EVALSHA sends a 40-byte digest
+   * instead; NOSCRIPT (a cold or restarted/failed-over Redis) is handled by
+   * sending the body once, which also re-populates the server's script cache.
+   */
+  private async evalScript(script: string, key: string, args: Array<string | number>): Promise<RedisValue> {
+    const sha = this.scriptSha(script);
+    try {
+      return await this.client.command(['EVALSHA', sha, 1, key, ...args]);
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes('NOSCRIPT')) {
+        throw error;
+      }
+      return this.client.command(['EVAL', script, 1, key, ...args]);
+    }
+  }
+
+  private scriptSha(script: string): string {
+    let sha = this.scriptShaCache.get(script);
+    if (!sha) {
+      sha = createHash('sha1').update(script).digest('hex');
+      this.scriptShaCache.set(script, sha);
+    }
+    return sha;
   }
 
   private key(key: string): string {

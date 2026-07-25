@@ -10,7 +10,14 @@ const MAX_ATTEMPTS = 3;
 // A RUNNING job untouched for this long can only be a crashed batch (a healthy scan
 // finishes within DEFAULT_SCAN_TIMEOUT_MS); re-queue it on the next tick.
 const STALE_RUNNING_MS = 10 * 60_000;
-const EICAR_SIGNATURE = 'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*';
+// Matched as raw bytes: converting the payload to a string first allocated a
+// string as large as the upload (up to MAX_UPLOAD_SIZE_MB) on every scan, and
+// toString('utf8') also replaces invalid sequences, so a binary payload could be
+// mangled before the comparison.
+const EICAR_SIGNATURE = Buffer.from(
+  'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*',
+  'ascii',
+);
 
 export type FileScanVerdict = 'PASSED' | 'FAILED';
 
@@ -51,8 +58,7 @@ class LocalPolicyFileScanner implements FileScanner {
     const started = Date.now();
     try {
       assertUploadFileSecurity(file);
-      const body = file.buffer.toString('utf8');
-      if (body.includes(EICAR_SIGNATURE)) {
+      if (file.buffer.includes(EICAR_SIGNATURE)) {
         return {
           verdict: 'FAILED',
           engine: 'local-policy',

@@ -24,6 +24,7 @@ const checks = [
   'test:min-file-scan-claim-concurrency',
   'test:min-admin-audit-log-transaction',
   'test:min-rate-limit-shared-store',
+  'test:min-rate-limit-redis-store',
 ];
 
 const results = [];

@@ -21,6 +21,9 @@ export class MinioService {
   private readonly bucket: string;
   private readonly region: string;
   private readonly signedUrlTtlSeconds: number;
+  private bucketReady: Promise<void> | null = null;
+  /** SigV4 signing keys are derived per UTC day; cache the current day's. */
+  private signingKeyCache: { dateStamp: string; key: Buffer } | null = null;
 
   constructor(private readonly configService: ConfigService) {
     this.endpoint =
@@ -42,7 +45,7 @@ export class MinioService {
     payload: Buffer,
     contentType: string,
   ): Promise<string> {
-    await this.ensureBucket();
+    await this.ensureBucketOnce();
 
     await this.signedRequest({
       method: "PUT",
@@ -130,6 +133,24 @@ export class MinioService {
       .digest("hex");
 
     return `${this.baseUrl()}${canonicalUri}?${canonicalQueryString}&X-Amz-Signature=${signature}`;
+  }
+
+  /**
+   * Verify (and create) the bucket at most once per process.
+   *
+   * ensureBucket() was called on every upload, adding a signed HEAD round trip —
+   * and a second PUT round trip when it 404s — to the latency of each one. The
+   * bucket does not disappear during a process lifetime, so the check is
+   * memoized. The promise is cleared on failure so a transient object-store
+   * error does not permanently poison uploads, and concurrent uploads share one
+   * in-flight check rather than racing to create the bucket.
+   */
+  private ensureBucketOnce(): Promise<void> {
+    this.bucketReady ??= this.ensureBucket().catch((error: unknown) => {
+      this.bucketReady = null;
+      throw error;
+    });
+    return this.bucketReady;
   }
 
   private async ensureBucket(): Promise<void> {
@@ -247,12 +268,27 @@ export class MinioService {
     return new Date().toISOString().replace(/[:-]|\.\d{3}/g, "");
   }
 
+  /**
+   * SigV4 signing key, cached for the current dateStamp. The derivation is four
+   * chained HMACs and depends only on (secret, date, region, service), so
+   * recomputing it for every signed request — including every presigned download
+   * URL — was pure overhead. The cache holds a single entry, so it rolls over
+   * naturally at the UTC day boundary.
+   */
   private getSigningKey(dateStamp: string): Buffer {
+    const cached = this.signingKeyCache;
+    if (cached && cached.dateStamp === dateStamp) {
+      return cached.key;
+    }
+
     const kDate = createHmac("sha256", `AWS4${this.secretKey}`)
       .update(dateStamp)
       .digest();
     const kRegion = createHmac("sha256", kDate).update(this.region).digest();
     const kService = createHmac("sha256", kRegion).update("s3").digest();
-    return createHmac("sha256", kService).update("aws4_request").digest();
+    const key = createHmac("sha256", kService).update("aws4_request").digest();
+
+    this.signingKeyCache = { dateStamp, key };
+    return key;
   }
 }

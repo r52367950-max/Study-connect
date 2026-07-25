@@ -16,7 +16,38 @@ type FilePolicy = {
   exts: readonly string[];
 };
 
-const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
+/** ZIP record signatures, little-endian. */
+const LOCAL_HEADER_SIGNATURE = 0x04034b50;
+const CENTRAL_ENTRY_SIGNATURE = 0x02014b50;
+const EOCD_SIGNATURE = 0x06054b50;
+
+const EOCD_MIN_SIZE = 22;
+const CENTRAL_ENTRY_MIN_SIZE = 46;
+const MAX_ZIP_COMMENT_SIZE = 0xffff;
+
+/** Bounds the central-directory walk so a hostile header cannot spin the loop. */
+const MAX_ZIP_ENTRIES = 4096;
+/** Total declared inflated size we are willing to accept across all entries. */
+const MAX_ZIP_UNCOMPRESSED_BYTES = 512 * 1024 * 1024;
+/** Declared inflated:stored ratio above which the archive is treated as a bomb. */
+const MAX_ZIP_COMPRESSION_RATIO = 200;
+
+/**
+ * How far back from EOF to look for the PDF `%%EOF` trailer. The marker belongs in
+ * the trailer, and readers conventionally scan only the tail; bounding it keeps a
+ * 50MB upload from being scanned end to end on every request.
+ */
+const PDF_TRAILER_SCAN_BYTES = 4096;
+const PDF_EOF_MARKER = Buffer.from('%%EOF', 'ascii');
+
+/** Chunk size for streaming UTF-8 validation (see assertText). */
+const TEXT_DECODE_CHUNK_BYTES = 64 * 1024;
+
+type ZipEntry = {
+  name: string;
+  compressedSize: number;
+  uncompressedSize: number;
+};
 
 const FILE_POLICIES: readonly FilePolicy[] = [
   {
@@ -115,39 +146,161 @@ function assertPdf(payload: Buffer): void {
     throw new UnprocessableEntityException('INVALID_FILE_SIGNATURE');
   }
 
-  if (!payload.includes(Buffer.from('%%EOF'))) {
+  const tailStart = Math.max(0, payload.length - PDF_TRAILER_SCAN_BYTES);
+  if (!payload.subarray(tailStart).includes(PDF_EOF_MARKER)) {
     throw new UnprocessableEntityException('INVALID_PDF_STRUCTURE');
   }
 }
 
-function assertZip(payload: Buffer): void {
-  if (payload.length < 22) {
+/**
+ * Locate the End Of Central Directory record.
+ *
+ * Scans backwards over the maximum comment length and requires the record's
+ * declared comment length to equal the number of bytes that actually follow it.
+ * That equality is what distinguishes a real EOCD from four coincidental bytes —
+ * the previous implementation accepted any file that merely *contained* the
+ * signature anywhere, so arbitrary content with three byte patterns sprinkled in
+ * passed as a valid archive.
+ */
+function findEocdOffset(payload: Buffer): number {
+  const maxComment = Math.min(MAX_ZIP_COMMENT_SIZE, payload.length - EOCD_MIN_SIZE);
+
+  for (let commentLength = 0; commentLength <= maxComment; commentLength += 1) {
+    const offset = payload.length - EOCD_MIN_SIZE - commentLength;
+    if (
+      payload.readUInt32LE(offset) === EOCD_SIGNATURE &&
+      payload.readUInt16LE(offset + 20) === commentLength
+    ) {
+      return offset;
+    }
+  }
+
+  throw new UnprocessableEntityException('INVALID_ZIP_STRUCTURE');
+}
+
+/**
+ * Parse the central directory into its entries.
+ *
+ * Only the central directory is read — a few hundred bytes — instead of the
+ * previous approach, which converted the entire payload (up to MAX_UPLOAD_SIZE_MB)
+ * into a latin1 JavaScript string and then ran substring searches over it.
+ */
+function parseZipEntries(payload: Buffer): ZipEntry[] {
+  if (payload.length < EOCD_MIN_SIZE) {
     throw new UnprocessableEntityException('INVALID_ZIP_STRUCTURE');
   }
 
-  const hasLocalHeader = payload.includes(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
-  const hasCentralDirectory = payload.includes(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
-  const hasEndOfCentralDirectory = payload.includes(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  const eocdOffset = findEocdOffset(payload);
+  const entryCount = payload.readUInt16LE(eocdOffset + 10);
+  const centralDirSize = payload.readUInt32LE(eocdOffset + 12);
+  const centralDirOffset = payload.readUInt32LE(eocdOffset + 16);
+  const centralDirEnd = centralDirOffset + centralDirSize;
 
-  if (!hasLocalHeader || !hasCentralDirectory || !hasEndOfCentralDirectory) {
+  // The central directory must lie wholly inside the file, ahead of the EOCD.
+  if (centralDirEnd > eocdOffset || entryCount > MAX_ZIP_ENTRIES) {
     throw new UnprocessableEntityException('INVALID_ZIP_STRUCTURE');
+  }
+
+  // A non-empty archive begins with a local file header.
+  if (entryCount > 0 && payload.readUInt32LE(0) !== LOCAL_HEADER_SIGNATURE) {
+    throw new UnprocessableEntityException('INVALID_ZIP_STRUCTURE');
+  }
+
+  const entries: ZipEntry[] = [];
+  let cursor = centralDirOffset;
+
+  for (let index = 0; index < entryCount; index += 1) {
+    if (
+      cursor + CENTRAL_ENTRY_MIN_SIZE > centralDirEnd ||
+      payload.readUInt32LE(cursor) !== CENTRAL_ENTRY_SIGNATURE
+    ) {
+      throw new UnprocessableEntityException('INVALID_ZIP_STRUCTURE');
+    }
+
+    const compressedSize = payload.readUInt32LE(cursor + 20);
+    const uncompressedSize = payload.readUInt32LE(cursor + 24);
+    const nameLength = payload.readUInt16LE(cursor + 28);
+    const extraLength = payload.readUInt16LE(cursor + 30);
+    const commentLength = payload.readUInt16LE(cursor + 32);
+    const nameStart = cursor + CENTRAL_ENTRY_MIN_SIZE;
+    const nameEnd = nameStart + nameLength;
+
+    if (nameEnd > centralDirEnd) {
+      throw new UnprocessableEntityException('INVALID_ZIP_STRUCTURE');
+    }
+
+    entries.push({
+      name: payload.toString('utf8', nameStart, nameEnd),
+      compressedSize,
+      uncompressedSize,
+    });
+
+    cursor = nameEnd + extraLength + commentLength;
+  }
+
+  return entries;
+}
+
+/**
+ * Reject entry names that would escape the extraction root. Nothing in this
+ * service unpacks archives today, but the name travels with the stored object and
+ * a consumer that does extract it must not be handed a traversal payload.
+ */
+function assertSafeEntryNames(entries: ZipEntry[]): void {
+  for (const entry of entries) {
+    const normalized = entry.name.replace(/\\/g, '/');
+    const isAbsolute = normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized);
+    const escapes = normalized.split('/').includes('..');
+
+    if (isAbsolute || escapes) {
+      throw new UnprocessableEntityException('UNSAFE_ZIP_ENTRY_NAME');
+    }
+  }
+}
+
+/**
+ * Reject declared-decompression bombs: a small archive that expands to a size
+ * capable of exhausting memory or disk in whatever consumes it downstream.
+ */
+function assertNotZipBomb(entries: ZipEntry[], payloadLength: number): void {
+  let totalUncompressed = 0;
+  for (const entry of entries) {
+    totalUncompressed += entry.uncompressedSize;
+  }
+
+  if (totalUncompressed > MAX_ZIP_UNCOMPRESSED_BYTES) {
+    throw new UnprocessableEntityException('ZIP_UNCOMPRESSED_TOO_LARGE');
+  }
+
+  if (payloadLength > 0 && totalUncompressed / payloadLength > MAX_ZIP_COMPRESSION_RATIO) {
+    throw new UnprocessableEntityException('ZIP_COMPRESSION_RATIO_EXCEEDED');
+  }
+}
+
+function assertZip(payload: Buffer): ZipEntry[] {
+  const entries = parseZipEntries(payload);
+  assertSafeEntryNames(entries);
+  assertNotZipBomb(entries, payload.length);
+  return entries;
+}
+
+/** OOXML containers must carry the content-type map plus at least one part under `prefix`. */
+function assertOoxml(payload: Buffer, prefix: string, errorCode: string): void {
+  const entries = assertZip(payload);
+  const hasContentTypes = entries.some((entry) => entry.name === '[Content_Types].xml');
+  const hasPart = entries.some((entry) => entry.name.startsWith(prefix));
+
+  if (!hasContentTypes || !hasPart) {
+    throw new UnprocessableEntityException(errorCode);
   }
 }
 
 function assertDocx(payload: Buffer): void {
-  assertZip(payload);
-  const zipView = payload.toString('latin1');
-  if (!zipView.includes('[Content_Types].xml') || !zipView.includes('word/')) {
-    throw new UnprocessableEntityException('INVALID_DOCX_STRUCTURE');
-  }
+  assertOoxml(payload, 'word/', 'INVALID_DOCX_STRUCTURE');
 }
 
 function assertPptx(payload: Buffer): void {
-  assertZip(payload);
-  const zipView = payload.toString('latin1');
-  if (!zipView.includes('[Content_Types].xml') || !zipView.includes('ppt/')) {
-    throw new UnprocessableEntityException('INVALID_PPTX_STRUCTURE');
-  }
+  assertOoxml(payload, 'ppt/', 'INVALID_PPTX_STRUCTURE');
 }
 
 function assertText(payload: Buffer): void {
@@ -155,8 +308,17 @@ function assertText(payload: Buffer): void {
     throw new UnprocessableEntityException('INVALID_TEXT_STRUCTURE');
   }
 
+  // Validate UTF-8 in chunks. A single decode() of the whole payload allocated a
+  // string as large as the upload; `stream: true` carries partial multi-byte
+  // sequences across chunk boundaries, and the final flush rejects a truncated
+  // trailing sequence. The decoder is per-call because streaming is stateful.
+  const decoder = new TextDecoder('utf-8', { fatal: true });
   try {
-    UTF8_DECODER.decode(payload);
+    for (let offset = 0; offset < payload.length; offset += TEXT_DECODE_CHUNK_BYTES) {
+      const end = Math.min(offset + TEXT_DECODE_CHUNK_BYTES, payload.length);
+      decoder.decode(payload.subarray(offset, end), { stream: true });
+    }
+    decoder.decode();
   } catch {
     throw new UnprocessableEntityException('INVALID_TEXT_STRUCTURE');
   }

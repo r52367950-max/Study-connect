@@ -8,6 +8,8 @@ const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 @Injectable()
 export class CsrfGuard implements CanActivate {
+  private originCache: { raw: string; origins: ReadonlySet<string> } | null = null;
+
   constructor(
     private readonly configService: ConfigService,
     private readonly csrfService: CsrfService,
@@ -68,24 +70,43 @@ export class CsrfGuard implements CanActivate {
   }
 
   private assertOriginAllowed(origin: string): void {
-    const allowList = this.parseAllowedOrigins();
-    if (!allowList.includes(origin)) {
+    if (!this.getAllowedOrigins().has(origin)) {
       throw new ForbiddenException('Origin not allowed');
     }
   }
 
-  private parseAllowedOrigins(): string[] {
+  /**
+   * Allow-list of origins, parsed once per CORS_ORIGIN value.
+   *
+   * This runs on every state-changing request, and previously re-split the config
+   * string and re-parsed each entry through the URL constructor every time, then
+   * did a linear scan. The parsed result is cached against the raw value so a
+   * config change is still picked up, and membership is a Set lookup.
+   */
+  private getAllowedOrigins(): ReadonlySet<string> {
     const raw = this.configService.get<string>('CORS_ORIGIN') ?? '';
-    return raw
-      .split(',')
-      .map((origin) => origin.trim())
-      .filter((origin) => origin.length > 0)
-      .map((origin) => {
-        try {
-          return normalizeOrigin(origin);
-        } catch {
-          return origin;
-        }
-      });
+    if (this.originCache?.raw === raw) {
+      return this.originCache.origins;
+    }
+
+    const origins = new Set(
+      raw
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter((origin) => origin.length > 0)
+        .map((origin) => {
+          try {
+            return normalizeOrigin(origin);
+          } catch {
+            // Keep an unparsable entry verbatim: it can then only ever match an
+            // identical literal, rather than being silently dropped from the
+            // allow-list (which would loosen nothing, but hides a config typo).
+            return origin;
+          }
+        }),
+    );
+
+    this.originCache = { raw, origins };
+    return origins;
   }
 }

@@ -24,12 +24,26 @@
 | `POST /auth/login` | `auth-login-ip-email` | 20 / 60s（默认） | 登录 IP+邮箱组合限流（可 env 覆盖） |
 | `POST /auth/login` | `auth-login-lock` | 5 次失败后锁定 5 分钟（默认） | 登录失败熔断锁，按 **标识 + 客户端 IP** 维度（见下方说明） |
 | `POST /auth/login` | `auth-login-ip-fail` | 10 次失败后锁定 5 分钟（默认，**仅 IP 维度**） | 纯 IP 失败计数；防凭据填充（同 IP 轮换 identifier）；N 可通过 `RATE_LIMIT_LOGIN_IP_ONLY_MAX_FAILURES` 覆盖。**成功登录不重置该计数**（否则攻击者用一个已知账号穿插成功登录即可绕过），仅靠失败窗口自然过期 |
+| `POST /auth/refresh` | `auth-refresh` | 60 / 60s | 限制刷新令牌接口被持续打满（此前仅受全局规则约束） |
 | `POST /auth/logout` | `auth-logout` | 40 / 60s | 限制登出洪泛 |
 | `POST /auth/change-password` | `auth-change-password` | 5 / 60s | 限制高成本密码校验被持续打满 |
 | `POST /materials` | `materials-upload` | 10 / 60s | 上传接口保护 |
 | `POST /materials/:id/ratings` | `materials-rating-write` | 20 / 60s | 评分写入接口 |
 | `GET /materials/:id/download` | `materials-download` | 90 / 60s | 下载接口保护 |
+| `GET /materials/recommend` | `materials-recommend` | 60 / 60s | 推荐接口保护 |
+| `GET /search/suggestions` | `search-suggest` | 60 / 60s | 搜索建议接口保护 |
+| `GET /downloads/:token` | `downloads-token-redeem` | 120 / 60s | 下载令牌兑换 |
 | `GET/POST /admin/*` | `admin-strict` | 30 / 60s | 管理后台统一更严格限流 |
+
+## 限流存储不可用时的行为
+
+`RateLimitGuard` 采用 **fail-closed**：若限流存储（Redis）不可用，请求不会被放行，
+而是返回 `503`，并记录 `event=rate_limit_store_unavailable` 告警日志。
+（此前该情况会表现为不可区分的 `500`，在日志/看板上与应用缺陷混淆。）
+
+生产环境必须配置 `RATE_LIMIT_REDIS_URL` 或 `REDIS_URL`，否则启动即失败——
+本机内存存储无法在多实例间共享计数。Redis 侧脚本调用使用 `EVALSHA`，
+遇到 `NOSCRIPT` 时自动回退到一次 `EVAL` 并重新填充脚本缓存。
 
 ## 登录相关可配置参数
 
