@@ -42,6 +42,20 @@ function resolveRequestId(headerValue: string | string[] | undefined): string {
     : randomUUID();
 }
 
+/** Secrets that travel in a URL path rather than a header or body. */
+const SENSITIVE_PATH_PATTERNS: ReadonlyArray<[RegExp, string]> = [
+  [/^\/downloads\/[^/?#]+/, '/downloads/[REDACTED]'],
+];
+
+function redactSensitivePath(url: string): string {
+  for (const [pattern, replacement] of SENSITIVE_PATH_PATTERNS) {
+    if (pattern.test(url)) {
+      return url.replace(pattern, replacement);
+    }
+  }
+  return url;
+}
+
 const appGuardProviders: Provider[] = APP_GUARD_CHAIN.map((guardClass: Type<unknown>) => ({
   provide: APP_GUARD,
   useClass: guardClass,
@@ -66,6 +80,17 @@ const appGuardProviders: Provider[] = APP_GUARD_CHAIN.map((guardClass: Type<unkn
         autoLogging: true,
         genReqId: (req: IncomingMessage) => resolveRequestId(req.headers['x-request-id']),
         customProps: (req: IncomingMessage & { id?: unknown }) => ({ reqId: req.id }),
+        serializers: {
+          // autoLogging writes req.url for every request, and the one-time
+          // download token travels in the path (GET /downloads/:token). That put a
+          // live credential into the application log, log shipper and any log
+          // aggregator. Mask it; the rest of the URL is kept for debugging.
+          req(req: { url?: string; [key: string]: unknown }) {
+            return typeof req.url === 'string'
+              ? { ...req, url: redactSensitivePath(req.url) }
+              : req;
+          },
+        },
       },
     }),
     ConfigModule.forRoot({

@@ -502,13 +502,14 @@ export class RateLimitService implements OnModuleDestroy {
   }
 
   async recordLoginFailure(input: LoginFailureInput): Promise<void> {
+    const ipOnlyKey = this.buildLoginIpOnlyKey(input.ip);
     const lockedKeys = await this.store.recordLoginFailure(input, {
       identityKeys: this.buildLoginLockKeys(input.identifier, input.ip),
-      ipOnlyKey: this.buildLoginIpOnlyKey(input.ip),
+      ipOnlyKey,
     });
 
     for (const key of lockedKeys) {
-      const ipOnly = key === this.buildLoginIpOnlyKey(input.ip);
+      const ipOnly = key === ipOnlyKey;
       this.recordLimitHit({
         metricKey: ipOnly ? 'rate_limit.rule.auth-login-ip-fail' : 'rate_limit.rule.auth-login-lock',
         rule: ipOnly ? 'auth-login-ip-fail' : 'auth-login-lock',

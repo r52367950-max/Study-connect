@@ -30,6 +30,7 @@ const FAILURE_SENTINEL = '__invalid__';
 @Injectable()
 export class OtpService {
   private readonly logger = new Logger(OtpService.name);
+  private failureHashCache: { secret: string; hash: string } | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -251,8 +252,18 @@ export class OtpService {
     return createHmac('sha256', this.secret()).update(code).digest('hex');
   }
 
+  /**
+   * Marker hash stored on failed-verification rows. It is a constant for a given
+   * secret but was re-derived (an HMAC) on every call, and several calls happen
+   * per send/consume request. Cached against the secret so a rotated OTP_SECRET is
+   * still picked up.
+   */
   private failureHash(): string {
-    return this.hashCode(FAILURE_SENTINEL);
+    const secret = this.secret();
+    if (this.failureHashCache?.secret !== secret) {
+      this.failureHashCache = { secret, hash: this.hashCode(FAILURE_SENTINEL) };
+    }
+    return this.failureHashCache.hash;
   }
 
   private codesEqual(stored: string, candidate: string): boolean {
