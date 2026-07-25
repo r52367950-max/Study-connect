@@ -4,6 +4,8 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
@@ -22,6 +24,8 @@ const DEFAULT_LOGIN_LOCK_MS = 5 * 60_000;
 
 @Injectable()
 export class RateLimitGuard implements CanActivate {
+  private readonly logger = new Logger(RateLimitGuard.name);
+
   constructor(
     private readonly reflector: Reflector,
     private readonly configService: ConfigService,
@@ -33,6 +37,27 @@ export class RateLimitGuard implements CanActivate {
       return true;
     }
 
+    try {
+      return await this.enforce(context);
+    } catch (error) {
+      // A 429 (or any other deliberate rejection) passes straight through.
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      // Reaching here means the rate-limit store itself failed — e.g. Redis is
+      // unreachable. Stay fail-closed (never serve a request we could not meter),
+      // but say so explicitly: this previously surfaced as an opaque 500 that was
+      // indistinguishable from an application bug in logs and dashboards.
+      this.logger.error({
+        event: 'rate_limit_store_unavailable',
+        ts: new Date().toISOString(),
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      throw new ServiceUnavailableException('Rate limiting unavailable');
+    }
+  }
+
+  private async enforce(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
     const ip = this.extractIp(request);
     const method = request.method;

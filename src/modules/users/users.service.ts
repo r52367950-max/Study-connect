@@ -5,6 +5,36 @@ import { GRADES, STAGES, SUBJECTS, UpdateProfileDto, VIEWED_KINDS } from './dto/
 import { ProfileResponseDto } from './dto/profile.dto';
 import { stripControlChars } from '../materials/upload-security.util';
 
+/**
+ * Exactly the columns toProfileResponse reads.
+ *
+ * The previous `include: { school: true }` selected every User column, pulling
+ * passwordHash and tokenVersion out of the database on every profile read and
+ * write. toProfileResponse never emitted them, but keeping credential material
+ * one spread operator away from a response body is an avoidable hazard — and the
+ * wide row was read for nothing.
+ */
+const PROFILE_SELECT = {
+  id: true,
+  email: true,
+  phone: true,
+  username: true,
+  profileRole: true,
+  displayName: true,
+  schoolNameFreeText: true,
+  city: true,
+  stages: true,
+  grades: true,
+  subjects: true,
+  viewedKinds: true,
+  collaborativeOptIn: true,
+  onboardedAt: true,
+  gradesUpdatedAt: true,
+  school: { select: { id: true, name: true, city: true } },
+} satisfies Prisma.UserSelect;
+
+type ProfileRow = Prisma.UserGetPayload<{ select: typeof PROFILE_SELECT }>;
+
 @Injectable()
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
@@ -12,7 +42,7 @@ export class UsersService {
   async getProfile(userId: string): Promise<ProfileResponseDto> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: { school: true },
+      select: PROFILE_SELECT,
     });
     if (!user) {
       throw new NotFoundException('User not found');
@@ -81,7 +111,7 @@ export class UsersService {
     const user = await this.prisma.user.update({
       where: { id: userId },
       data,
-      include: { school: true },
+      select: PROFILE_SELECT,
     });
 
     return toProfileResponse(user);
@@ -129,9 +159,7 @@ export class UsersService {
   }
 }
 
-type UserWithSchool = Prisma.UserGetPayload<{ include: { school: true } }>;
-
-export function toProfileResponse(user: UserWithSchool): ProfileResponseDto {
+export function toProfileResponse(user: ProfileRow): ProfileResponseDto {
   return {
     id: user.id,
     email: user.email,

@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/infra';
+import { matchesUserWhere } from './support/user-where-match';
 
 type DbUser = {
   id: string;
@@ -16,13 +17,22 @@ type DbUser = {
 
 class PrismaServiceMock {
   private users: DbUser[] = [];
+  readonly auditLogs: Array<Record<string, unknown>> = [];
+
+  // AdminService.banUser writes the ban and its audit-log entry in one
+  // interactive transaction, so the mock has to expose both.
+  $transaction = async <T>(task: (tx: this) => Promise<T>): Promise<T> => task(this);
+
+  adminAuditLog = {
+    create: async ({ data }: { data: Record<string, unknown> }) => {
+      this.auditLogs.push(data);
+      return data;
+    },
+  };
 
   user = {
-    findFirst: async ({ where }: { where: { OR: Array<{ email?: string; username?: string }> } }) => {
-      const found = this.users.find((user) =>
-        where.OR.some((cond) => cond.email === user.email || cond.username === user.username),
-      );
-      return found ?? null;
+    findFirst: async ({ where }: { where: unknown }) => {
+      return this.users.find((user) => matchesUserWhere(user, where)) ?? null;
     },
 
     create: async ({
@@ -335,20 +345,29 @@ async function run(): Promise<void> {
   console.log('ban status:', banRes.status);
   console.log('me by old token after ban (expected 401):', meByOldTokenAfterBan.status);
 
-  if (meByOldTokenAfterLogout.status !== 401) {
-    throw new Error('old token should be invalid immediately after logout');
+  try {
+    if (meByOldTokenAfterLogout.status !== 401) {
+      throw new Error('old token should be invalid immediately after logout');
+    }
+    if (meByOldTokenAfterPasswordChange.status !== 401) {
+      throw new Error('old token should be invalid immediately after password change');
+    }
+    if (oldPwdLoginRes.status !== 401 || newPwdLoginRes.status !== 200) {
+      throw new Error('password rotation login assertions failed');
+    }
+    if (banRes.status !== 201 || meByOldTokenAfterBan.status !== 401) {
+      throw new Error('ban should invalidate existing user token immediately');
+    }
+    if (prismaMock.auditLogs.at(-1)?.action !== 'USER_BAN') {
+      throw new Error('ban should write a USER_BAN audit log entry');
+    }
+    console.log('min-auth-session-invalidation-check passed');
+  } finally {
+    // Always tear the server down: without this a failed assertion leaves the
+    // listener open, the event loop never drains, and the run hangs instead of
+    // reporting the failure (a hung CI job hides the actual error).
+    await app.close();
   }
-  if (meByOldTokenAfterPasswordChange.status !== 401) {
-    throw new Error('old token should be invalid immediately after password change');
-  }
-  if (oldPwdLoginRes.status !== 401 || newPwdLoginRes.status !== 200) {
-    throw new Error('password rotation login assertions failed');
-  }
-  if (banRes.status !== 201 || meByOldTokenAfterBan.status !== 401) {
-    throw new Error('ban should invalidate existing user token immediately');
-  }
-
-  await app.close();
 }
 
 run().catch((error: unknown) => {

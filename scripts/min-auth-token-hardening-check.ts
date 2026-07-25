@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/infra';
+import { matchesUserWhere } from './support/user-where-match';
 
 type DbUser = {
   id: string;
@@ -16,11 +17,8 @@ class PrismaServiceMock {
   private users: DbUser[] = [];
 
   user = {
-    findFirst: async ({ where }: { where: { OR: Array<{ email?: string; username?: string }> } }) => {
-      const found = this.users.find((user) =>
-        where.OR.some((cond) => cond.email === user.email || cond.username === user.username),
-      );
-      return found ?? null;
+    findFirst: async ({ where }: { where: unknown }) => {
+      return this.users.find((user) => matchesUserWhere(user, where)) ?? null;
     },
 
     create: async ({

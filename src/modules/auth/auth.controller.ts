@@ -85,6 +85,11 @@ export class AuthController {
 
   @Public()
   @Post('refresh')
+  @RateLimit({
+    name: 'auth-refresh',
+    limit: 60,
+    windowMs: 60_000,
+  })
   @ApiOperation({ summary: 'Refresh short-lived access token' })
   @ApiOkResponse({
     schema: {

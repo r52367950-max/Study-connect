@@ -1,6 +1,8 @@
 import { Module, Provider, Type } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { randomUUID } from 'node:crypto';
+import type { IncomingMessage } from 'node:http';
 import { LoggerModule } from 'nestjs-pino';
 import { RateLimitGuard } from './common/rate-limit.guard';
 import { RateLimitModule } from './common/rate-limit.module';
@@ -22,6 +24,23 @@ import { ViewEventsModule } from './modules/view-events/view-events.module';
 import { HealthModule } from './modules/health/health.module';
 
 export const APP_GUARD_CHAIN = [RateLimitGuard, CsrfGuard, JwtAuthGuard, RolesGuard] as const;
+
+/** Correlation ids we are willing to echo from a client: short, opaque, single-line. */
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
+
+/**
+ * Honor an inbound `x-request-id` for trace correlation, but only when it is a
+ * bounded, opaque token. The header is attacker-controlled and lands in every log
+ * line for the request, so accepting it verbatim allowed newline-based log forging
+ * (injecting fabricated entries) and unbounded strings repeated across each line.
+ * Anything else — including a repeated header, which arrives as an array — gets a
+ * fresh UUID.
+ */
+function resolveRequestId(headerValue: string | string[] | undefined): string {
+  return typeof headerValue === 'string' && REQUEST_ID_PATTERN.test(headerValue)
+    ? headerValue
+    : randomUUID();
+}
 
 const appGuardProviders: Provider[] = APP_GUARD_CHAIN.map((guardClass: Type<unknown>) => ({
   provide: APP_GUARD,
@@ -45,8 +64,8 @@ const appGuardProviders: Provider[] = APP_GUARD_CHAIN.map((guardClass: Type<unkn
           censor: '[REDACTED]',
         },
         autoLogging: true,
-        genReqId: (req: any) => req.headers['x-request-id'] ?? require('crypto').randomUUID(),
-        customProps: (req: any) => ({ reqId: req.id }),
+        genReqId: (req: IncomingMessage) => resolveRequestId(req.headers['x-request-id']),
+        customProps: (req: IncomingMessage & { id?: unknown }) => ({ reqId: req.id }),
       },
     }),
     ConfigModule.forRoot({

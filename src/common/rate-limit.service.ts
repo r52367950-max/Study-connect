@@ -218,6 +218,11 @@ class MinimalRedisClient implements OnModuleDestroy {
       socket.on('error', (err) => this.rejectAll(err));
       socket.on('close', () => {
         this.socket = null;
+        this.buffer = Buffer.alloc(0);
+        // Settle anything still in flight. Without this, commands issued just
+        // before the peer closed stayed pending forever and every request waiting
+        // on the rate limiter hung instead of failing.
+        this.rejectAll(new Error('Redis connection closed'));
       });
     }).finally(() => {
       this.connecting = null;
@@ -246,7 +251,21 @@ class MinimalRedisClient implements OnModuleDestroy {
   private handleData(chunk: Buffer): void {
     this.buffer = Buffer.concat([this.buffer, chunk]);
     while (this.queue.length > 0) {
-      const parsed = this.parse(0);
+      let parsed: { value: RedisValue; next: number } | null;
+      try {
+        parsed = this.parse(0);
+      } catch (err) {
+        // parse() throws on an error reply (`-ERR ...`) or an unsupported RESP
+        // type. This runs inside a 'data' event handler, so letting it escape
+        // was an uncaught exception that took the whole process down — any Redis
+        // error reply (NOSCRIPT, OOM, READONLY, wrong DB) became a remote crash.
+        // Fail the in-flight command instead and drop the desynchronised stream.
+        this.rejectAll(err instanceof Error ? err : new Error(String(err)));
+        this.buffer = Buffer.alloc(0);
+        this.socket?.destroy();
+        this.socket = null;
+        return;
+      }
       if (!parsed) return;
       this.buffer = this.buffer.subarray(parsed.next);
       const pending = this.queue.shift()!;
@@ -255,6 +274,7 @@ class MinimalRedisClient implements OnModuleDestroy {
   }
 
   private parse(offset: number): { value: RedisValue; next: number } | null {
+    if (offset >= this.buffer.length) return null;
     const type = String.fromCharCode(this.buffer[offset]);
     const lineEnd = this.buffer.indexOf('\r\n', offset);
     if (lineEnd < 0) return null;

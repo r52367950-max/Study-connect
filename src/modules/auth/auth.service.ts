@@ -8,7 +8,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { OtpChannel, OtpPurpose, User, UserRole, UserStatus } from '@prisma/client';
+import { OtpChannel, OtpPurpose, Prisma, User, UserRole, UserStatus } from '@prisma/client';
 import { randomBytes, scrypt, timingSafeEqual, createHmac } from 'crypto';
 import { promisify } from 'util';
 import { PrismaService } from '../../infra';
@@ -41,6 +41,15 @@ type RefreshPayload = {
 const scryptAsync = promisify(scrypt);
 const MAX_JWT_LENGTH = 4096;
 const JWT_SEGMENT_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * Fixed `salt:hash` pair in the same format hashPassword() produces, used only to
+ * spend equivalent scrypt time when no user matched. It corresponds to no real
+ * password and is never compared for authentication — verifyPassword against it
+ * always fails.
+ */
+const DECOY_PASSWORD_HASH =
+  '00000000000000000000000000000000:' + '0'.repeat(128);
 
 @Injectable()
 export class AuthService {
@@ -87,7 +96,7 @@ export class AuthService {
 
     const passwordHash = await this.hashPassword(dto.password);
 
-    const user = await this.prisma.user.create({
+    const createArgs = {
       data: {
         email: dto.email ? identifier : null,
         phone: dto.phone ? identifier : null,
@@ -102,7 +111,22 @@ export class AuthService {
         username: true,
         role: true,
       },
-    });
+    } satisfies Prisma.UserCreateArgs;
+
+    let user;
+    try {
+      user = await this.prisma.user.create(createArgs);
+    } catch (err) {
+      // The existence check above is a snapshot: two concurrent registrations for
+      // the same email/phone/username both pass it, and the loser hits the unique
+      // constraint. Surface that as the same 422 the pre-check produces instead of
+      // letting a raw Prisma error escape as a 500 (which also leaks column names
+      // via err.meta.target outside production).
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new UnprocessableEntityException('Identifier or username already exists');
+      }
+      throw err;
+    }
 
     return {
       accessToken: this.issueAccessToken(user, 0),
@@ -134,21 +158,19 @@ export class AuthService {
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
-    let user;
-    try {
-      user = await this.prisma.user.findFirst({
-        where: dto.email ? { email: identifier } : { phone: identifier },
-      });
-    } catch {
-      user = await this.prisma.user.findFirst({
-        where: {
-          OR: [dto.email ? { email: identifier } : { phone: identifier }],
-        },
-      });
-    }
+    const user = await this.prisma.user.findFirst({
+      where: dto.email ? { email: identifier } : { phone: identifier },
+    });
 
     const userStatus = user?.status ?? UserStatus.ACTIVE;
     if (!user || userStatus === UserStatus.BANNED) {
+      // Burn the same scrypt work a real password check would, so an unknown (or
+      // banned) identifier is not distinguishable from a wrong password by response
+      // time. Without this, the no-user path skips key derivation entirely and
+      // returns in ~1ms vs ~100ms, which is a reliable account-enumeration oracle.
+      if (dto.password) {
+        await this.verifyPassword(dto.password, DECOY_PASSWORD_HASH);
+      }
       // Avoid leaking which side failed; record + throw same error
       await this.recordLoginFailure(identifier, ipAddress);
       throw new UnauthorizedException('Invalid credentials');

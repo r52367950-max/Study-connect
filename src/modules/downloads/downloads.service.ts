@@ -1,6 +1,7 @@
 import {
   GoneException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
   StreamableFile,
   UnauthorizedException,
@@ -19,6 +20,9 @@ import {
   decideDownloadDeliveryPolicy,
   parsePositiveInt,
 } from "./download-policy";
+
+/** Bare `host` or `host:port` — no scheme, path, credentials or comma-joined values. */
+const HOST_PATTERN = /^[A-Za-z0-9.-]+(:\d{1,5})?$/;
 
 @Injectable()
 export class DownloadsService {
@@ -45,7 +49,7 @@ export class DownloadsService {
     );
     const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
 
-    await (this.prisma as any).downloadToken.create({
+    await this.prisma.downloadToken.create({
       data: { token, materialId: material.id, userId, expiresAt },
       select: { token: true },
     });
@@ -74,7 +78,7 @@ export class DownloadsService {
         deliveryMode: "direct";
       }
   > {
-    const record = await (this.prisma as any).downloadToken.findUnique({
+    const record = await this.prisma.downloadToken.findUnique({
       where: { token },
       select: {
         token: true,
@@ -98,13 +102,15 @@ export class DownloadsService {
     await this.ensureActiveUser(userId);
     const material = await this.ensureDownloadableMaterial(record.materialId);
 
-    const usedAt = new Date();
-    await this.markTokenUsedAndCountDownload(
-      token,
-      material.id,
-      userId,
-      usedAt,
-    );
+    // The usedAt check above is advisory only — it reads a snapshot, so two
+    // concurrent redemptions of the same token both observe usedAt = null. The
+    // claim below is what actually enforces single use: the `usedAt: null`
+    // predicate makes the two writers race on the same row and exactly one
+    // update matches. The loser gets 410 and never reaches the file, so a
+    // token cannot be spent twice (nor inflate downloadCount twice).
+    if (!(await this.claimTokenAndCountDownload(token, material.id, userId))) {
+      throw new GoneException("DOWNLOAD_TOKEN_USED");
+    }
 
     const urlTtlSeconds = parsePositiveInt(
       this.configService.get<string>(DOWNLOAD_URL_TTL_SECONDS_KEY),
@@ -185,35 +191,53 @@ export class DownloadsService {
     }
   }
 
-  private async markTokenUsedAndCountDownload(
+  /**
+   * Atomically claim a one-time download token and record the download.
+   *
+   * Returns false when the token was already spent (another request won the
+   * race, or it was redeemed earlier), in which case nothing is written — the
+   * Download row and the downloadCount increment are inside the same
+   * transaction as the claim, so they can only happen for the single winner.
+   */
+  private async claimTokenAndCountDownload(
     token: string,
     materialId: string,
     userId: string,
-    usedAt: Date,
-  ) {
-    await this.prisma.$transaction([
-      (this.prisma as any).downloadToken.update({
-        where: { token },
-        data: { usedAt },
-        select: { token: true },
-      }),
-      this.prisma.download.create({
+  ): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.downloadToken.updateMany({
+        where: { token, usedAt: null },
+        data: { usedAt: new Date() },
+      });
+
+      if (claimed.count !== 1) {
+        return false;
+      }
+
+      await tx.download.create({
         data: { userId, materialId },
-        select: {
-          id: true,
-          userId: true,
-          materialId: true,
-          downloadedAt: true,
-        },
-      }),
-      this.prisma.material.update({
+        select: { id: true },
+      });
+      await tx.material.update({
         where: { id: materialId },
         data: { downloadCount: { increment: 1 } },
         select: { id: true },
-      }),
-    ]);
+      });
+
+      return true;
+    });
   }
 
+  /**
+   * Base URL the returned `downloadUrl` is built from.
+   *
+   * `Host` is attacker-controlled, so reflecting it would let a caller shape the
+   * download link this API hands back (and any link it gets pasted into). A
+   * configured DOWNLOAD_BASE_URL always wins, and in production it is required:
+   * booting without it would otherwise silently fall back to the Host header.
+   * Outside production the header is still accepted for local/dev convenience,
+   * but only after validating it looks like a bare host[:port].
+   */
   private getBaseUrl(request?: {
     protocol?: string;
     get?: (name: string) => string | undefined;
@@ -222,8 +246,16 @@ export class DownloadsService {
     if (configured) {
       return configured.replace(/\/$/, "");
     }
-    const host = request?.get?.("host") ?? "localhost:3000";
-    const protocol = request?.protocol ?? "http";
-    return `${protocol}://${host}`;
+
+    if (this.configService.get<string>("NODE_ENV") === "production") {
+      throw new InternalServerErrorException(
+        "DOWNLOAD_BASE_URL must be configured in production",
+      );
+    }
+
+    const host = request?.get?.("host");
+    const safeHost = host && HOST_PATTERN.test(host) ? host : "localhost:3000";
+    const protocol = request?.protocol === "https" ? "https" : "http";
+    return `${protocol}://${safeHost}`;
   }
 }

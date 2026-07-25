@@ -4,6 +4,7 @@ import { ValidationPipe } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { AppModule } from "../src/app.module";
 import { MinioService, PrismaService } from "../src/infra";
+import { matchesUserWhere } from './support/user-where-match';
 
 type UserRole = "USER" | "ADMIN";
 type MaterialStatus = "PENDING" | "APPROVED" | "REJECTED";
@@ -73,19 +74,8 @@ class PrismaServiceMock {
   };
 
   user = {
-    findFirst: async ({
-      where,
-    }: {
-      where: { OR: Array<{ email?: string; username?: string }> };
-    }) => {
-      return (
-        this.users.find((user) =>
-          where.OR.some(
-            (cond) =>
-              cond.email === user.email || cond.username === user.username,
-          ),
-        ) ?? null
-      );
+    findFirst: async ({ where }: { where: unknown }) => {
+      return this.users.find((user) => matchesUserWhere(user, where)) ?? null;
     },
     create: async ({
       data,
@@ -190,18 +180,24 @@ class PrismaServiceMock {
         this.downloadTokens.find((item) => item.token === where.token) ?? null
       );
     },
-    update: async ({
+    // Mirrors Prisma's conditional updateMany: only rows still matching
+    // `usedAt: null` are written, and the caller gets the affected-row count.
+    // This is what makes the single-use claim race-safe in production.
+    updateMany: async ({
       where,
       data,
     }: {
-      where: { token: string };
+      where: { token: string; usedAt: null };
       data: { usedAt: Date };
     }) => {
       const item = this.downloadTokens.find(
-        (candidate) => candidate.token === where.token,
+        (candidate) =>
+          candidate.token === where.token &&
+          (where.usedAt !== null || candidate.usedAt === null),
       );
-      if (item) item.usedAt = data.usedAt;
-      return { token: where.token };
+      if (!item) return { count: 0 };
+      item.usedAt = data.usedAt;
+      return { count: 1 };
     },
   };
 
@@ -500,6 +496,45 @@ async function run(): Promise<void> {
     "redeemed response should keep material id",
   );
 
+  // Replaying an already-spent token must be rejected and must not create a
+  // second Download row (single-use enforcement).
+  const replayRes = await fetch(approvedBody.downloadUrl, {
+    headers: { cookie: authCookie },
+  });
+  assert(
+    replayRes.status === 410,
+    `spent token replay should be 410, got ${replayRes.status}`,
+  );
+
+  // Regression: concurrent redemption of one fresh token. Before the atomic
+  // claim, both requests read usedAt = null and both were served, double-spending
+  // the token and double-counting the download.
+  const concurrentTokenRes = await fetch(
+    `${base}/materials/${seeded.approvedId}/download`,
+    { headers: { cookie: authCookie } },
+  );
+  const concurrentToken = (await concurrentTokenRes.json()) as {
+    downloadUrl: string;
+  };
+  const raced = await Promise.all(
+    Array.from({ length: 5 }, () =>
+      fetch(concurrentToken.downloadUrl, { headers: { cookie: authCookie } }),
+    ),
+  );
+  const successes = raced.filter((res) => res.status === 200).length;
+  const gone = raced.filter((res) => res.status === 410).length;
+  assert(
+    successes === 1,
+    `exactly one concurrent redemption should succeed, got ${successes}`,
+  );
+  assert(
+    gone === raced.length - 1,
+    `losing concurrent redemptions should be 410, got ${gone}`,
+  );
+  console.log(
+    `download token single-use check passed: 1x200 / ${gone}x410 under concurrent redeem`,
+  );
+
   const pendingRes = await fetch(
     `${base}/materials/${seeded.pendingId}/download`,
     {
@@ -522,14 +557,16 @@ async function run(): Promise<void> {
     `private approved material download should be 404, got ${privateApprovedRes.status}`,
   );
 
+  // One row per *successfully redeemed* token: the first redemption plus the
+  // single winner of the 5-way race. Replays and losers must not add rows.
   const downloads = prismaMock.debugDownloads();
   assert(
-    downloads.length === 1,
-    `downloads should only contain one successful record, got ${downloads.length}`,
+    downloads.length === 2,
+    `downloads should contain one record per redeemed token, got ${downloads.length}`,
   );
   assert(
-    downloads[0]?.materialId === seeded.approvedId,
-    "download record should be created only for approved public material",
+    downloads.every((row) => row.materialId === seeded.approvedId),
+    "download records should be created only for approved public material",
   );
 
   await app.close();

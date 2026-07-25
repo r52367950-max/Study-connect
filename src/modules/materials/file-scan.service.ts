@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit, UnprocessableEntityException } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, UnprocessableEntityException } from '@nestjs/common';
 import { Socket } from 'node:net';
 import { FileSafetyStatus, FileScanJob, FileScanJobStatus } from '@prisma/client';
 import { MinioService, PrismaService } from '../../infra';
@@ -34,6 +34,17 @@ export type FileScanResult = {
 export interface FileScanner {
   scan(file: FileScanPayload): Promise<FileScanResult>;
 }
+
+/**
+ * DI token for the FileScanner implementation.
+ *
+ * `FileScanner` is a TypeScript interface, so it is erased at runtime and Nest
+ * sees the constructor parameter as `Object` — it cannot be used as a provider
+ * token. Without an explicit token Nest fails to resolve FileScanService and,
+ * because MaterialsModule is part of AppModule, the whole application refuses to
+ * bootstrap. A default parameter does not help: Nest supplies the argument.
+ */
+export const FILE_SCANNER = Symbol('FILE_SCANNER');
 
 class LocalPolicyFileScanner implements FileScanner {
   async scan(file: FileScanPayload): Promise<FileScanResult> {
@@ -178,6 +189,10 @@ export class FileScanService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly minioService: MinioService,
+    // @Optional() so the default still applies when the service is constructed
+    // directly (the min-* scripts pass their own scanner, or none at all).
+    @Optional()
+    @Inject(FILE_SCANNER)
     private readonly scanner: FileScanner = createFileScannerFromEnv(),
   ) {}
 

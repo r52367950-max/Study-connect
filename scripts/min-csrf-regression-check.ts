@@ -198,13 +198,17 @@ function assertEqual<T>(actual: T, expected: T, label: string): void {
 
 async function discoverStateChangingRoutes(): Promise<string[]> {
   const routes: string[] = [];
-  const methodRegex = /@(Post|Put|Patch|Delete)\((?:'([^']*)')?\)/g;
+  // Quote-agnostic: controllers in this repo mix ' and " (materials.controller.ts
+  // uses double quotes). Matching only single quotes made @Controller("materials")
+  // miss, which `continue`d past the whole controller and dropped its write routes
+  // (POST /materials, POST /materials/:id/ratings) from CSRF coverage entirely.
+  const methodRegex = /@(Post|Put|Patch|Delete)\(\s*(?:['"`]([^'"`]*)['"`])?\s*\)/g;
 
   for (const relativePath of CONTROLLER_FILES) {
     const fileContent = await readFile(resolve(process.cwd(), relativePath), 'utf8');
-    const controllerMatch = fileContent.match(/@Controller\('([^']*)'\)/);
+    const controllerMatch = fileContent.match(/@Controller\(\s*['"`]([^'"`]*)['"`]\s*\)/);
     if (!controllerMatch) {
-      continue;
+      throw new Error(`controller-prefix-unparsed: ${relativePath}`);
     }
 
     const controllerPrefix = controllerMatch[1];

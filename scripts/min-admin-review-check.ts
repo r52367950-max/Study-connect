@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { AppModule } from '../src/app.module';
 import { MinioService, PrismaService } from '../src/infra';
+import { matchesUserWhere } from './support/user-where-match';
 
 type UserRole = 'USER' | 'ADMIN';
 type MaterialStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'OFFLINE';
@@ -39,12 +40,8 @@ class PrismaServiceMock {
   private auditLogs: unknown[] = [];
 
   user = {
-    findFirst: async ({ where }: { where: { OR: Array<{ email?: string; username?: string }> } }) => {
-      return (
-        this.users.find((user) =>
-          where.OR.some((cond) => cond.email === user.email || cond.username === user.username),
-        ) ?? null
-      );
+    findFirst: async ({ where }: { where: unknown }) => {
+      return this.users.find((user) => matchesUserWhere(user, where)) ?? null;
     },
     create: async ({
       data,

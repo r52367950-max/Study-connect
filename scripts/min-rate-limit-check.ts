@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module';
 import { RateLimitService } from '../src/common/rate-limit.service';
 import { MinioService, PrismaService } from '../src/infra';
 import { AuthService } from '../src/modules/auth/auth.service';
+import { matchesUserWhere } from './support/user-where-match';
 
 type UserRole = 'USER' | 'ADMIN';
 type MaterialStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'OFFLINE';
@@ -42,12 +43,8 @@ class PrismaServiceMock {
   private materials: DbMaterial[] = [];
 
   user = {
-    findFirst: async ({ where }: { where: { OR: Array<{ email?: string; username?: string }> } }) => {
-      return (
-        this.users.find((user) =>
-          where.OR.some((cond) => cond.email === user.email || cond.username === user.username),
-        ) ?? null
-      );
+    findFirst: async ({ where }: { where: unknown }) => {
+      return this.users.find((user) => matchesUserWhere(user, where)) ?? null;
     },
 
     create: async ({
