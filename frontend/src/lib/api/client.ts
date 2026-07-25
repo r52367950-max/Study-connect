@@ -103,7 +103,14 @@ export const SILENT_401_PATHS = ['/view-events']
 // a session expiry), and the login form surfaces the 401 as a form error. A
 // guest's refresh would fail anyway, so skip refresh + redirect for these too —
 // otherwise guests get an infinite full-page reload loop via /login.
-export const SELF_HANDLED_401_PATHS = ['/auth/me', '/auth/login']
+//
+// /auth/csrf must be here to break a deadlock: the refresh call is a POST, so the
+// request interceptor blocks it on ensureCsrfToken(). If the resulting
+// GET /auth/csrf 401s and goes through the refresh path, it awaits the very
+// refresh promise that is waiting on it — the refresh never settles, so every
+// state-changing request hangs until the axios timeout. /auth/csrf is a public
+// endpoint anyway; refreshing a token cannot make it succeed.
+export const SELF_HANDLED_401_PATHS = ['/auth/me', '/auth/login', '/auth/csrf']
 
 function matchesAnyPath(requestUrl: string | undefined, paths: string[]): boolean {
   if (!requestUrl) return false

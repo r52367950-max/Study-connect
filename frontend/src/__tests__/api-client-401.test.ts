@@ -3,6 +3,13 @@ import type { InternalAxiosRequestConfig } from 'axios'
 import { apiClient, isSelfHandled401 } from '@/lib/api/client'
 import { useAuthStore } from '@/lib/auth-store'
 
+// The client only trusts a csrf cookie matching /^[a-f0-9]{64}$/i (it rejects a
+// malformed token rather than echoing it back). Fixtures must therefore use a
+// well-formed token, otherwise the request interceptor falls through to
+// bootstrapping GET /auth/csrf, which is exactly what these tests avoid.
+const VALID_CSRF_TOKEN = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+
+
 describe('isSelfHandled401()', () => {
   it('returns true for /auth/me', () => {
     expect(isSelfHandled401('/auth/me')).toBe(true)
@@ -42,7 +49,7 @@ describe('api client 401 handling', () => {
     Object.defineProperty(globalThis, 'document', {
       configurable: true,
       writable: true,
-      value: { cookie: 'csrf-token=test-csrf' },
+      value: { cookie: `csrf-token=${VALID_CSRF_TOKEN}` },
     })
 
     Object.defineProperty(window, 'location', {
