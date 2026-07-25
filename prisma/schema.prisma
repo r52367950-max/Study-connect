@@ -172,8 +172,15 @@ model Material {
   @@index([status, year])
   @@index([status, region])
   @@index([status, kind])
+  // GIN trigram indexes back the `%` containment predicate used by the paged
+  // material search (buildApprovedWhere / approvedPublicWhere).
   @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "materials_title_trgm_idx")
   @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "materials_description_trgm_idx")
+  // GiST trigram indexes additionally support the KNN distance operator (`<->`),
+  // which lets /search/suggestions get its top-N straight from the index instead
+  // of scoring every approved row. GIN cannot serve an ORDER BY <-> scan.
+  @@index([title(ops: raw("gist_trgm_ops"))], type: Gist, map: "materials_title_trgm_gist_idx")
+  @@index([description(ops: raw("gist_trgm_ops"))], type: Gist, map: "materials_description_trgm_gist_idx")
   @@map("materials")
 }
 
