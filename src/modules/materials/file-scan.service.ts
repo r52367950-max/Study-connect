@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit, UnprocessableEntityException } from '@nestjs/common';
 import { Socket } from 'node:net';
-import { FileSafetyStatus, FileScanJobStatus } from '@prisma/client';
+import { FileSafetyStatus, FileScanJob, FileScanJobStatus } from '@prisma/client';
 import { MinioService, PrismaService } from '../../infra';
 import { assertUploadFileSecurity, UploadSecurityStatus } from './upload-security.util';
 

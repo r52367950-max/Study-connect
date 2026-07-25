@@ -7,6 +7,9 @@ type AuditContext = {
   userAgent?: string;
 };
 
+/** Newest scan reports returned by getMaterialScanDetails; bounds the response size. */
+const SCAN_REPORT_PAGE_SIZE = 10;
+
 @Injectable()
 export class AdminService {
   private readonly logger = new Logger(AdminService.name);
@@ -72,6 +75,69 @@ export class AdminService {
       total,
       items,
     };
+  }
+
+  /**
+   * File-scan detail view for one material: the material's current safety status,
+   * its scan job (queue state / retry bookkeeping) and the most recent scan reports.
+   *
+   * `rawSummary` is deliberately not selected — it is an unbounded blob echoed from a
+   * third-party AV/CDR vendor, and `verdict`/`signature`/`riskReasons` already carry
+   * everything a reviewer acts on. Missing material -> 404 per docs/error-code-spec.md.
+   */
+  async getMaterialScanDetails(materialId: string) {
+    const material = await this.prisma.material.findUnique({
+      where: { id: materialId },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        fileKey: true,
+        fileSafetyStatus: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!material) {
+      throw new NotFoundException('Material not found');
+    }
+
+    const [job, reports] = await Promise.all([
+      this.prisma.fileScanJob.findUnique({
+        where: { materialId },
+        select: {
+          id: true,
+          status: true,
+          attempts: true,
+          lastError: true,
+          scheduledAt: true,
+          nextRunAt: true,
+          lockedBy: true,
+          lockedAt: true,
+          failedAt: true,
+          updatedAt: true,
+        },
+      }),
+      this.prisma.fileScanReport.findMany({
+        where: { materialId },
+        orderBy: { createdAt: 'desc' },
+        take: SCAN_REPORT_PAGE_SIZE,
+        select: {
+          id: true,
+          jobId: true,
+          verdict: true,
+          engine: true,
+          engineVersion: true,
+          signature: true,
+          riskReasons: true,
+          scanDurationMs: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    return { material, job: job ?? null, reports };
   }
 
   async approveMaterial(materialId: string, adminId: string, context: AuditContext = {}) {
